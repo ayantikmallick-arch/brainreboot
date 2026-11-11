@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { onAuthStateChanged, User, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import ParticleBackground from "@/Components/ParticleBackground";
@@ -30,6 +31,31 @@ interface AttachedFile {
 
 interface ChatInterfaceProps {
   initialChatId?: string;
+}
+
+
+// Safe Markdown Preprocessor for Normalizing Tables and HTML tags
+function formatMarkdownResponse(content: string): string {
+  if (!content) return "";
+
+  // 1. Normalize linebreaks & HTML tags safely without raw HTML rendering
+  let text = content
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<hr\s*\/?>/gi, "\n\n---\n\n")
+    .replace(/<b>(.*?)<\/b>/gi, "**$1**")
+    .replace(/<strong>(.*?)<\/strong>/gi, "**$1**")
+    .replace(/<i>(.*?)<\/i>/gi, "*$1*")
+    .replace(/<em>(.*?)<\/em>/gi, "*$1*")
+    .replace(/<code>(.*?)<\/code>/gi, "`$1`")
+    .replace(/&nbsp;/gi, " ");
+
+  // 2. Ensure Markdown tables preceded by text have a leading blank line so GFM parser recognizes them
+  text = text.replace(/([^\n])\n(\|[^\n]+\|[ \t]*\n\|[\s:-]+\|)/g, "$1\n\n$2");
+
+  // 3. Ensure Markdown tables followed by text have a trailing blank line
+  text = text.replace(/(\|[^\n]+\|)\n([^\|\n\s])/g, "$1\n\n$2");
+
+  return text;
 }
 
 export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
@@ -839,45 +865,111 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                     <div className="flex-1 min-w-0">
                       <div className="w-full bg-[#161d35]/90 border border-[#232b48] text-[#eef2ff] px-4 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-bl-sm text-xs sm:text-sm leading-relaxed break-words shadow-lg backdrop-blur-sm">
                         <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
                           components={{
-                            p: ({ children }) => <p className="mb-2.5 last:mb-0">{children}</p>,
-                            strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
-                            em: ({ children }) => <em className="italic text-[#8b93b8]">{children}</em>,
-                            h1: ({ children }) => <h1 className="text-xl font-bold text-white mt-3 mb-2">{children}</h1>,
-                            h2: ({ children }) => <h2 className="text-lg font-bold text-white mt-2 mb-1.5">{children}</h2>,
-                            h3: ({ children }) => <h3 className="text-base font-bold text-[#22c1ff] mt-2 mb-1">{children}</h3>,
-                            ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1">{children}</ul>,
-                            ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1">{children}</ol>,
-                            li: ({ children }) => <li className="text-[#eef2ff]">{children}</li>,
-                            a: ({ href, children }) => {
-  const isSafe = href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:"));
-  return (
-    <a
-      href={isSafe ? href : "#"}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-[#22c1ff] underline underline-offset-2 hover:text-[#c026d3] transition"
-    >
-      {children}
-    </a>
-  );
-},
-blockquote: ({ children }) => (
-                              <blockquote className="border-l-4 border-[#8b5cf6] pl-3 py-1 italic bg-[#0d1226]/60 rounded-r text-[#8b93b8] my-2">
+                            // Tables (Styled for BrainFlow dark theme with horizontal scroll)
+                            table: ({ children }) => (
+                              <div className="w-full my-4 overflow-x-auto rounded-xl border border-[#232b48] shadow-lg bg-[#0c1020]/90">
+                                <table className="w-full border-collapse text-left text-xs sm:text-sm min-w-[320px]">
+                                  {children}
+                                </table>
+                              </div>
+                            ),
+                            thead: ({ children }) => (
+                              <thead className="bg-[#10162a] border-b border-[#232b48] text-[#22c1ff] font-semibold">
+                                {children}
+                              </thead>
+                            ),
+                            tbody: ({ children }) => (
+                              <tbody className="divide-y divide-[#232b48]/60 text-[#eef2ff]">
+                                {children}
+                              </tbody>
+                            ),
+                            tr: ({ children }) => (
+                              <tr className="transition-colors hover:bg-[#161d35]/60 even:bg-[#0e1326]/40 odd:bg-[#10162a]/20">
+                                {children}
+                              </tr>
+                            ),
+                            th: ({ children }) => (
+                              <th className="px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs font-bold uppercase tracking-wider text-[#22c1ff] border-r border-[#232b48]/60 last:border-r-0 whitespace-nowrap">
+                                {children}
+                              </th>
+                            ),
+                            td: ({ children }) => (
+                              <td className="px-3.5 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm text-[#eef2ff]/90 border-r border-[#232b48]/40 last:border-r-0 align-top leading-relaxed">
+                                {children}
+                              </td>
+                            ),
+
+                            // Headings
+                            h1: ({ children }) => (
+                              <h1 className="text-xl sm:text-2xl font-bold font-display text-white mt-4 mb-2 tracking-tight flex items-center gap-2">
+                                <span className="w-1.5 h-5 rounded-full bg-gradient-to-b from-[#22c1ff] to-[#8b5cf6] inline-block flex-shrink-0"></span>
+                                <span>{children}</span>
+                              </h1>
+                            ),
+                            h2: ({ children }) => (
+                              <h2 className="text-lg sm:text-xl font-bold font-display text-white mt-3.5 mb-2 tracking-tight flex items-center gap-2">
+                                <span className="w-1.5 h-4 rounded-full bg-gradient-to-b from-[#8b5cf6] to-[#c026d3] inline-block flex-shrink-0"></span>
+                                <span>{children}</span>
+                              </h2>
+                            ),
+                            h3: ({ children }) => (
+                              <h3 className="text-sm sm:text-base font-bold text-[#22c1ff] mt-3 mb-1.5 font-display">
+                                {children}
+                              </h3>
+                            ),
+                            h4: ({ children }) => (
+                              <h4 className="text-xs sm:text-sm font-semibold text-[#8b93b8] mt-2 mb-1 uppercase tracking-wider">
+                                {children}
+                              </h4>
+                            ),
+
+                            // Paragraphs
+                            p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-relaxed text-[#eef2ff]/95">{children}</p>,
+
+                            // Lists
+                            ul: ({ children }) => <ul className="list-disc pl-5 my-2.5 space-y-1.5 marker:text-[#8b5cf6]">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal pl-5 my-2.5 space-y-1.5 marker:text-[#22c1ff] marker:font-semibold">{children}</ol>,
+                            li: ({ children }) => <li className="text-[#eef2ff] leading-relaxed pl-0.5">{children}</li>,
+
+                            // Blockquotes
+                            blockquote: ({ children }) => (
+                              <blockquote className="border-l-4 border-[#8b5cf6] pl-3.5 py-1.5 italic bg-[#0d1226]/80 rounded-r-xl text-[#8b93b8] my-3 shadow-inner">
                                 {children}
                               </blockquote>
                             ),
+
+                            // Divider
+                            hr: () => <hr className="border-t border-[#232b48] my-4" />,
+
+                            // Links
+                            a: ({ href, children }) => {
+                              const isSafe = href && (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("mailto:"));
+                              return (
+                                <a
+                                  href={isSafe ? href : "#"}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[#22c1ff] underline underline-offset-2 hover:text-[#c026d3] transition font-medium"
+                                >
+                                  {children}
+                                </a>
+                              );
+                            },
+
+                            // Code blocks & inline code
                             code: ({ className, children, ...props }) => {
                               const isInline = !className && typeof children === "string" && !children.includes("\n");
                               if (isInline) {
                                 return (
-                                  <code className="bg-[#080b16] text-[#22c1ff] px-1.5 py-0.5 rounded text-xs font-mono" {...props}>
+                                  <code className="bg-[#080b16] text-[#22c1ff] px-1.5 py-0.5 rounded-md text-xs font-mono border border-[#232b48]/60" {...props}>
                                     {children}
                                   </code>
                                 );
                               }
                               return (
-                                <pre className="bg-[#080b16] border border-[#232b48] rounded-xl p-3.5 overflow-x-auto my-2.5 text-xs font-mono text-[#22c1ff]">
+                                <pre className="bg-[#080b16] border border-[#232b48] rounded-xl p-3.5 sm:p-4 overflow-x-auto my-3 text-xs sm:text-sm font-mono text-[#22c1ff] shadow-inner">
                                   <code className={className} {...props}>
                                     {children}
                                   </code>
@@ -886,7 +978,7 @@ blockquote: ({ children }) => (
                             },
                           }}
                         >
-                          {msg.content}
+                          {formatMarkdownResponse(msg.content)}
                         </ReactMarkdown>
                       </div>
 
@@ -898,7 +990,7 @@ blockquote: ({ children }) => (
                         >
                           {copiedIndex === index ? (
                             <>
-                              <span className="text-green-400">âœ“</span>
+                              <span className="text-green-400 font-bold">✓</span>
                               <span>Copied</span>
                             </>
                           ) : (
