@@ -7,13 +7,17 @@ import { useRouter } from "next/navigation";
 import {
   signInWithPopup,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
 } from "firebase/auth";
 import { auth, provider } from "@/lib/firebase";
 import ParticleBackground from "@/Components/ParticleBackground";
 
-export default function AuthPage() {
-  const [isSignUp, setIsSignUp] = useState(false);
+interface AuthPageProps {
+  initialMode?: "signin" | "signup";
+}
+
+export default function AuthPage({ initialMode = "signin" }: AuthPageProps) {
+  const [isSignUp, setIsSignUp] = useState(initialMode === "signup");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [consentGiven, setConsentGiven] = useState(false);
@@ -23,12 +27,12 @@ export default function AuthPage() {
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError("Please fill in all fields.");
+    if (!email || !password || (isSignUp && !name.trim())) {
+      setError("Please fill in all required fields.");
       return;
     }
     if (!consentGiven) {
-      setError("Please agree to the Terms of Service and Privacy Policy to proceed.");
+      setError("Please agree to the Terms of Service, Privacy Policy, and Cookie Policy to proceed.");
       return;
     }
     setError(null);
@@ -36,11 +40,37 @@ export default function AuthPage() {
 
     try {
       if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        // SECURE OTP SIGNUP FLOW:
+        // Do NOT create Firebase account yet. Request 6-digit OTP verification via Resend.
+        const res = await fetch("/api/auth/send-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            password,
+            consentGiven,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          setError(data.error || "Failed to initiate verification. Please try again.");
+          return;
+        }
+
+        // Save email in session storage for fallback and redirect to dedicated OTP verification page
+        try {
+          sessionStorage.setItem("pending_signup_email", email.trim().toLowerCase());
+        } catch {}
+
+        router.push(`/verify-otp?email=${encodeURIComponent(email.trim().toLowerCase())}`);
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        // STANDARD VERIFIED SIGN IN FLOW
+        await signInWithEmailAndPassword(auth, email.trim(), password);
+        router.push("/chat");
       }
-      router.push("/chat");
     } catch (err: any) {
       const code = err?.code || "";
       if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
@@ -52,7 +82,7 @@ export default function AuthPage() {
       } else if (code === "auth/popup-closed-by-user") {
         setError("Sign in was cancelled.");
       } else {
-        setError("Authentication failed. Please verify your details and try again.");
+        setError(err?.message || "Authentication failed. Please verify your details and try again.");
       }
     } finally {
       setLoading(false);
@@ -88,7 +118,7 @@ export default function AuthPage() {
 
       <div className="w-full flex justify-center items-center flex-1 my-auto">
         {/* Floating Glassmorphic Auth Card */}
-        <div className="relative z-10 w-full max-w-[420px] bg-[#10162a]/85 border border-[#232b48] rounded-2xl sm:rounded-[22px] p-5 sm:p-8 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl animate-rise">
+        <div className="relative z-10 w-full max-w-[430px] bg-[#10162a]/85 border border-[#232b48] rounded-2xl sm:rounded-[24px] p-5 sm:p-8 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.85)] backdrop-blur-xl animate-rise">
           {/* Brand Header */}
           <div className="flex flex-col items-center justify-center mb-5">
             <Link href="/" className="group flex flex-col items-center">
@@ -110,11 +140,11 @@ export default function AuthPage() {
             </Link>
 
             <p className="text-xs text-[#8b93b8] mt-1 tracking-wide">
-              Your AI Assistant &middot; Secure Authentication
+              {isSignUp ? "Create Your Verified Account" : "Welcome Back"}
             </p>
           </div>
 
-          {/* Tab Row */}
+          {/* Tab Switcher */}
           <div className="flex bg-[#0a0e1a] border border-[#232b48] rounded-xl p-1 mb-5">
             <button
               type="button"
@@ -147,8 +177,25 @@ export default function AuthPage() {
             </button>
           </div>
 
-          {/* Email & Password Form */}
+          {/* Form */}
           <form onSubmit={handleEmailAuth} className="space-y-3.5">
+            {/* Full Name field only for signup */}
+            {isSignUp && (
+              <div>
+                <label className="block text-xs text-[#8b93b8] mb-1 font-medium">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Alex Morgan"
+                  required={isSignUp}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#232b48] bg-[#0d1226] text-[#eef2ff] placeholder-[#4a5484] text-base sm:text-sm outline-none focus:border-[#8b5cf6] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.18)] transition"
+                />
+              </div>
+            )}
+
             <div>
               <label className="block text-xs text-[#8b93b8] mb-1 font-medium">
                 Email Address
@@ -173,6 +220,7 @@ export default function AuthPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
+                minLength={6}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-[#232b48] bg-[#0d1226] text-[#eef2ff] placeholder-[#4a5484] text-base sm:text-sm outline-none focus:border-[#8b5cf6] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.18)] transition"
               />
             </div>
@@ -217,7 +265,7 @@ export default function AuthPage() {
             </div>
 
             {error && (
-              <div className="text-xs text-[#ff5d7a] text-center font-medium bg-[#ff5d7a]/10 border border-[#ff5d7a]/20 rounded-lg py-2 px-3">
+              <div className="text-xs text-[#ff5d7a] text-center font-medium bg-[#ff5d7a]/10 border border-[#ff5d7a]/20 rounded-lg py-2 px-3 animate-rise">
                 {error}
               </div>
             )}
@@ -225,9 +273,19 @@ export default function AuthPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm text-white bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] hover:brightness-110 active:scale-[0.99] transition shadow-[0_4px_20px_rgba(139,92,246,0.35)] disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+              className="w-full py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm text-white bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] hover:brightness-110 active:scale-[0.99] transition shadow-[0_4px_20px_rgba(139,92,246,0.35)] disabled:opacity-50 disabled:cursor-not-allowed mt-2 flex items-center justify-center gap-2"
             >
-              {loading ? "Processing..." : isSignUp ? "Create account" : "Sign in"}
+              {loading ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                  </svg>
+                  <span>{isSignUp ? "Sending OTP Code..." : "Signing in..."}</span>
+                </>
+              ) : (
+                <span>{isSignUp ? "Create Account & Send Code &rarr;" : "Sign in"}</span>
+              )}
             </button>
           </form>
 

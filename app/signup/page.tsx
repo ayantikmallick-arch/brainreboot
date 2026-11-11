@@ -3,5 +3,5 @@
 import AuthPage from "../signin/page";
 
 export default function SignUpPage() {
-  return <AuthPage />;
+  return <AuthPage initialMode="signup" />;
 }
