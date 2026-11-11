@@ -53,16 +53,25 @@ export default function AuthPage({ initialMode = "signin" }: AuthPageProps) {
           }),
         });
 
-        const data = await res.json();
-
-        if (!res.ok) {
-          setError(data.error || "Failed to initiate verification. Please try again.");
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {
+          setError("Unable to reach the verification service. Please try again shortly.");
           return;
         }
 
-        // Save email in session storage for fallback and redirect to dedicated OTP verification page
+        if (!res.ok) {
+          setError(data?.error || "Failed to initiate verification. Please try again.");
+          return;
+        }
+
+        // Save email and verification token in session storage for fallback
         try {
           sessionStorage.setItem("pending_signup_email", email.trim().toLowerCase());
+          if (data?.verificationToken) {
+            sessionStorage.setItem("pending_signup_token", data.verificationToken);
+          }
         } catch {}
 
         router.push(`/verify-otp?email=${encodeURIComponent(email.trim().toLowerCase())}`);
@@ -284,7 +293,7 @@ export default function AuthPage({ initialMode = "signin" }: AuthPageProps) {
                   <span>{isSignUp ? "Sending OTP Code..." : "Signing in..."}</span>
                 </>
               ) : (
-                <span>{isSignUp ? "Create Account & Send Code &rarr;" : "Sign in"}</span>
+                <span>{isSignUp ? "Create Account & Send Code →" : "Sign in"}</span>
               )}
             </button>
           </form>

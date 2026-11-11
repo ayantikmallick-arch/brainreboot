@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signInWithCustomToken } from "firebase/auth";
+import { signInWithCustomToken, signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import ParticleBackground from "@/Components/ParticleBackground";
 
@@ -133,28 +133,45 @@ function OtpVerificationContent() {
     setLoading(true);
 
     try {
+      const storedToken = typeof window !== "undefined" ? sessionStorage.getItem("pending_signup_token") : null;
       const res = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, otp: code }),
+        body: JSON.stringify({ email, otp: code, verificationToken: storedToken || undefined }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        setError("Unable to process verification response. Please try again.");
+        return;
+      }
 
       if (!res.ok) {
-        setError(data.error || "Verification failed. Please verify your code and try again.");
+        if (data?.verificationToken) {
+          try {
+            sessionStorage.setItem("pending_signup_token", data.verificationToken);
+          } catch {}
+        }
+        setError(data?.error || "Verification failed. Please verify your code and try again.");
         return;
       }
 
       setSuccessMsg("Account verified! Signing you in...");
 
-      // If Firebase custom token is returned, sign in directly with Firebase Auth
+      // Authenticate the user with Firebase Client SDK
       if (data.customToken) {
         await signInWithCustomToken(auth, data.customToken);
+      } else if (data.autoLoginKey) {
+        await signInWithEmailAndPassword(auth, email, data.autoLoginKey);
       }
 
       // Clear pending signup storage
-      sessionStorage.removeItem("pending_signup_email");
+      try {
+        sessionStorage.removeItem("pending_signup_email");
+        sessionStorage.removeItem("pending_signup_token");
+      } catch {}
 
       // Short delay for visual confirmation before redirecting to chat
       setTimeout(() => {
@@ -176,20 +193,33 @@ function OtpVerificationContent() {
     setResending(true);
 
     try {
+      const storedToken = typeof window !== "undefined" ? sessionStorage.getItem("pending_signup_token") : null;
       const res = await fetch("/api/auth/resend-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, verificationToken: storedToken || undefined }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        setError("Unable to resend code. Please try again shortly.");
+        return;
+      }
 
       if (!res.ok) {
-        setError(data.error || "Failed to resend code.");
-        if (data.remainingSeconds) {
+        setError(data?.error || "Failed to resend code.");
+        if (data?.remainingSeconds) {
           setCountdown(data.remainingSeconds);
         }
         return;
+      }
+
+      if (data?.verificationToken) {
+        try {
+          sessionStorage.setItem("pending_signup_token", data.verificationToken);
+        } catch {}
       }
 
       setSuccessMsg("A new 6-digit verification code has been sent to your email.");

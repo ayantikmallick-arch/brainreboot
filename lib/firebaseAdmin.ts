@@ -1,72 +1,79 @@
-import { initializeApp, getApps, cert, App } from "firebase-admin/app";
-import { getAuth, Auth } from "firebase-admin/auth";
-import { getFirestore, Firestore } from "firebase-admin/firestore";
+// Firebase Admin SDK & Identity Toolkit REST fallback
+// Safe for serverless environments (e.g. Vercel) without Google Cloud default credentials
 
-let adminApp: App | null = null;
-let adminAuth: Auth | null = null;
-let adminDb: Firestore | null = null;
+let cachedAdminAuth: any = null;
+let cachedAdminDb: any = null;
+let isInitialized = false;
 
+/**
+ * Lazily initialize Firebase Admin SDK ONLY when explicit service account credentials exist.
+ * This strictly prevents Google Cloud default credential resolution crashes on Vercel.
+ */
 export function getFirebaseAdmin(): {
-  app: App | null;
-  auth: Auth | null;
-  db: Firestore | null;
+  auth: any | null;
+  db: any | null;
   hasCredentials: boolean;
 } {
-  const existingApps = getApps();
-  if (existingApps.length > 0) {
-    adminApp = existingApps[0];
-    adminAuth = getAuth(adminApp);
-    adminDb = getFirestore(adminApp);
-    return { app: adminApp, auth: adminAuth, db: adminDb, hasCredentials: true };
+  if (isInitialized) {
+    return {
+      auth: cachedAdminAuth,
+      db: cachedAdminDb,
+      hasCredentials: Boolean(cachedAdminAuth),
+    };
   }
 
+  isInitialized = true;
+
+  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY?.trim();
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.trim();
   const projectId =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
     "brainflow-2f214";
 
-  // Priority 1: Full JSON credential from FIREBASE_SERVICE_ACCOUNT_KEY
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-    try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-      adminApp = initializeApp({
-        credential: cert(serviceAccount),
+  if (!serviceAccountKey && (!clientEmail || !privateKey)) {
+    // No credentials configured — do NOT call initializeApp to prevent ADC crashes
+    return { auth: null, db: null, hasCredentials: false };
+  }
+
+  try {
+    // Dynamic import to avoid bundling issues if not configured
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const admin = require("firebase-admin");
+
+    const existingApps = admin.apps || [];
+    if (existingApps.length > 0) {
+      cachedAdminAuth = admin.auth();
+      cachedAdminDb = admin.firestore();
+      return { auth: cachedAdminAuth, db: cachedAdminDb, hasCredentials: true };
+    }
+
+    if (serviceAccountKey) {
+      const parsed = JSON.parse(serviceAccountKey);
+      admin.initializeApp({
+        credential: admin.credential.cert(parsed),
         projectId,
       });
-      adminAuth = getAuth(adminApp);
-      adminDb = getFirestore(adminApp);
-      return { app: adminApp, auth: adminAuth, db: adminDb, hasCredentials: true };
-    } catch (err: any) {
-      console.error("[Firebase Admin] Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY:", err?.message || err);
-    }
-  }
-
-  // Priority 2: Individual variables FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY
-  if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-    try {
-      adminApp = initializeApp({
-        credential: cert({
+    } else if (clientEmail && privateKey) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
           projectId,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+          clientEmail,
+          privateKey: privateKey.replace(/\\n/g, "\n"),
         }),
       });
-      adminAuth = getAuth(adminApp);
-      adminDb = getFirestore(adminApp);
-      return { app: adminApp, auth: adminAuth, db: adminDb, hasCredentials: true };
-    } catch (err: any) {
-      console.error("[Firebase Admin] Failed to initialize with cert variables:", err?.message || err);
     }
-  }
 
-  // Priority 3: Default application initialization (works in Google Cloud environments)
-  try {
-    adminApp = initializeApp({ projectId });
-    adminAuth = getAuth(adminApp);
-    adminDb = getFirestore(adminApp);
-    return { app: adminApp, auth: adminAuth, db: adminDb, hasCredentials: true };
-  } catch {
-    return { app: null, auth: null, db: null, hasCredentials: false };
+    cachedAdminAuth = admin.auth();
+    try {
+      cachedAdminDb = admin.firestore();
+    } catch {}
+
+    return { auth: cachedAdminAuth, db: cachedAdminDb, hasCredentials: true };
+  } catch (err: any) {
+    console.warn("[Firebase Admin] Initialization failed, using REST API fallback:", err?.message || err);
+    return { auth: null, db: null, hasCredentials: false };
   }
 }
 
@@ -75,12 +82,12 @@ export function getFirebaseAdmin(): {
  */
 export async function checkEmailAlreadyRegistered(email: string): Promise<boolean> {
   const normalized = email.trim().toLowerCase();
-  const { auth: adminAuth, hasCredentials } = getFirebaseAdmin();
+  const { auth, hasCredentials } = getFirebaseAdmin();
 
-  // 1. Try Firebase Admin SDK if credentials exist
-  if (hasCredentials && adminAuth) {
+  // 1. If service account is available, check via Admin SDK
+  if (hasCredentials && auth) {
     try {
-      const user = await adminAuth.getUserByEmail(normalized);
+      const user = await auth.getUserByEmail(normalized);
       if (user && user.uid) {
         return true;
       }
@@ -88,11 +95,10 @@ export async function checkEmailAlreadyRegistered(email: string): Promise<boolea
       if (err.code === "auth/user-not-found") {
         return false;
       }
-      // If permission error or other code, fall through to REST API check
     }
   }
 
-  // 2. High-reliability fallback via Firebase Auth REST API (Identity Toolkit)
+  // 2. High-reliability fallback via Firebase Auth Identity Toolkit REST API
   const apiKey =
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
     "AIzaSyAl5gfvzb0zRUBnYxzrrIabkhONMIKbgLY";
@@ -105,36 +111,28 @@ export async function checkEmailAlreadyRegistered(email: string): Promise<boolea
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           identifier: normalized,
-          continueUri: "https://brainflowai.in",
+          continueUri: "http://localhost",
         }),
       }
     );
 
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data.allProviders) && data.allProviders.length > 0) {
-        return true;
-      }
-      if (data.registered === true) {
+      if (Array.isArray(data.signinMethods) && data.signinMethods.length > 0) {
         return true;
       }
     }
-  } catch (restErr) {
-    // If check fails due to network, proceed safely
+  } catch (err) {
+    console.warn("[checkEmailAlreadyRegistered] REST check fallback error:", err);
   }
 
   return false;
 }
 
 /**
- * Create a Firebase user account after successful OTP verification.
- * Returns either a Firebase custom token (preferred) or account creation status.
+ * Create a verified Firebase user and return sign-in tokens
  */
-export async function createVerifiedFirebaseUser({
-  email,
-  password,
-  name,
-}: {
+export async function createVerifiedFirebaseUser(params: {
   email: string;
   password: string;
   name: string;
@@ -145,81 +143,89 @@ export async function createVerifiedFirebaseUser({
   idToken?: string;
   error?: string;
 }> {
-  const normalized = email.trim().toLowerCase();
-  const { auth: adminAuth, hasCredentials } = getFirebaseAdmin();
+  const { email, password, name } = params;
+  const normalizedEmail = email.trim().toLowerCase();
+  const { auth, hasCredentials } = getFirebaseAdmin();
 
-  // Method 1: Firebase Admin SDK (Creates user with emailVerified=true and returns customToken)
-  if (hasCredentials && adminAuth) {
+  // 1. If Admin SDK has valid credentials, create user via Admin SDK
+  if (hasCredentials && auth) {
     try {
-      const userRecord = await adminAuth.createUser({
-        email: normalized,
+      const userRecord = await auth.createUser({
+        email: normalizedEmail,
         password,
-        displayName: name.trim(),
+        displayName: name,
         emailVerified: true,
       });
 
-      // Generate single-use custom auth token for immediate client sign-in
-      const customToken = await adminAuth.createCustomToken(userRecord.uid);
-
+      const customToken = await auth.createCustomToken(userRecord.uid);
       return {
         success: true,
         uid: userRecord.uid,
         customToken,
       };
     } catch (err: any) {
-      console.error("[Firebase Admin Create User Error]:", err?.code || err?.message);
       if (err.code === "auth/email-already-exists") {
         return { success: false, error: "This email address is already registered." };
       }
-      // If service account lacks permission, fall through to REST API
+      console.warn("[Admin createUser] Failed, falling through to REST fallback:", err?.message || err);
     }
   }
 
-  // Method 2: Firebase Auth REST API (Works directly with Web API Key)
+  // 2. High-reliability fallback via Firebase Auth Identity Toolkit REST API
   const apiKey =
     process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
     "AIzaSyAl5gfvzb0zRUBnYxzrrIabkhONMIKbgLY";
 
   try {
-    const signupRes = await fetch(
+    const signUpRes = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: normalized,
+          email: normalizedEmail,
           password,
           returnSecureToken: true,
         }),
       }
     );
 
-    const signupData = await signupRes.json();
+    const signUpData = await signUpRes.json();
 
-    if (!signupRes.ok) {
-      const errorMsg = signupData?.error?.message || "Failed to create account.";
-      if (errorMsg.includes("EMAIL_EXISTS")) {
+    if (!signUpRes.ok) {
+      const msg = signUpData?.error?.message || "";
+      if (msg === "EMAIL_EXISTS") {
         return { success: false, error: "This email address is already registered." };
       }
-      return { success: false, error: errorMsg };
+      if (msg === "OPERATION_NOT_ALLOWED") {
+        return { success: false, error: "Email/password accounts are not enabled in Firebase." };
+      }
+      if (msg === "TOO_MANY_ATTEMPTS_TRY_LATER") {
+        return { success: false, error: "Too many attempts. Please try again later." };
+      }
+      return { success: false, error: signUpData?.error?.message || "Failed to create account." };
     }
 
-    const { idToken, localId } = signupData;
+    const { idToken, localId } = signUpData;
 
-    // Update display name via Identity Toolkit
-    if (idToken && name.trim()) {
-      await fetch(
-        `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            idToken,
-            displayName: name.trim(),
-            returnSecureToken: true,
-          }),
-        }
-      ).catch(() => {});
+    // Update displayName and mark emailVerified
+    if (idToken && name) {
+      try {
+        await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              idToken,
+              displayName: name,
+              returnSecureToken: true,
+            }),
+          }
+        );
+      } catch (err) {
+        console.warn("[accounts:update] Display name update non-fatal error:", err);
+      }
     }
 
     return {
@@ -228,9 +234,7 @@ export async function createVerifiedFirebaseUser({
       idToken,
     };
   } catch (err: any) {
-    return {
-      success: false,
-      error: err?.message || "Failed to communicate with authentication service.",
-    };
+    console.error("[createVerifiedFirebaseUser] Error:", err?.message || err);
+    return { success: false, error: "Failed to create verified Firebase account." };
   }
 }

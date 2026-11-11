@@ -6,7 +6,6 @@ import {
   hashOtp,
   incrementFailedAttempt,
   markVerificationUsed,
-  decryptPassword,
 } from "@/lib/otpStore";
 import { createVerifiedFirebaseUser } from "@/lib/firebaseAdmin";
 
@@ -15,6 +14,7 @@ export const runtime = "nodejs";
 const VerifyOtpSchema = z.object({
   email: z.string().email("Please provide a valid email address."),
   otp: z.string().regex(/^\d{6}$/, "Verification code must be exactly 6 digits."),
+  verificationToken: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -31,13 +31,17 @@ export async function POST(req: NextRequest) {
 
     const { email, otp } = parsed.data;
     const normalizedEmail = email.trim().toLowerCase();
+    const token =
+      parsed.data.verificationToken ||
+      req.cookies.get("__bf_pending_verif")?.value ||
+      null;
 
-    // Fetch pending registration
-    const record = await getPendingVerification(normalizedEmail);
+    // Fetch pending registration from token, memory, disk, or Firestore
+    const record = await getPendingVerification(normalizedEmail, token);
 
     if (!record) {
       return NextResponse.json(
-        { error: "No pending verification found for this email. Please sign up again." },
+        { error: "No pending verification session found for this email. Please sign up again." },
         { status: 404 }
       );
     }
@@ -59,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     if (record.attempts >= 5) {
       return NextResponse.json(
-        { error: "Too many incorrect attempts. This code has been invalidated for security. Please request a new code." },
+        { error: "Maximum attempts reached. This code has been invalidated for security. Please request a new code." },
         { status: 429 }
       );
     }
@@ -74,39 +78,39 @@ export async function POST(req: NextRequest) {
       crypto.timingSafeEqual(expectedBuffer, computedBuffer);
 
     if (!isMatch) {
-      const { remainingAttempts, isLocked } = await incrementFailedAttempt(normalizedEmail);
+      const { remainingAttempts, isLocked, updatedToken } = await incrementFailedAttempt(record);
 
-      if (isLocked) {
-        return NextResponse.json(
-          { error: "Maximum attempts reached. This code is now invalidated. Please request a new one." },
-          { status: 429 }
-        );
-      }
-
-      return NextResponse.json(
-        { error: `Incorrect verification code. ${remainingAttempts} attempt${remainingAttempts === 1 ? "" : "s"} remaining.` },
-        { status: 400 }
+      const errResponse = NextResponse.json(
+        {
+          error: isLocked
+            ? "Maximum attempts reached. This code is now invalidated. Please request a new one."
+            : `Incorrect verification code. ${remainingAttempts} attempt${remainingAttempts === 1 ? "" : "s"} remaining.`,
+          remainingAttempts,
+          isLocked,
+          verificationToken: updatedToken,
+        },
+        { status: isLocked ? 429 : 400 }
       );
+
+      // Update cookie with new attempt count
+      errResponse.cookies.set("__bf_pending_verif", updatedToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/api/auth",
+        maxAge: 5 * 60,
+      });
+
+      return errResponse;
     }
 
     // OTP IS VALID: Mark single-use used immediately to prevent replay
-    await markVerificationUsed(normalizedEmail);
-
-    // Decrypt the password securely on the server
-    let decryptedPassword = "";
-    try {
-      decryptedPassword = decryptPassword(record.encryptedPassword, record.iv, record.tag);
-    } catch (decryptErr) {
-      return NextResponse.json(
-        { error: "Session decryption failed. Please sign up again." },
-        { status: 500 }
-      );
-    }
+    await markVerificationUsed(record);
 
     // Create the verified Firebase account
     const createResult = await createVerifiedFirebaseUser({
       email: normalizedEmail,
-      password: decryptedPassword,
+      password: record.password,
       name: record.name,
     });
 
@@ -117,14 +121,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    const successResponse = NextResponse.json({
       success: true,
       message: "Account verified and created successfully.",
       uid: createResult.uid,
       customToken: createResult.customToken,
       idToken: createResult.idToken,
+      autoLoginKey: record.password,
       email: normalizedEmail,
     });
+
+    // Clear the pending verification cookie
+    successResponse.cookies.set("__bf_pending_verif", "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/api/auth",
+      maxAge: 0,
+    });
+
+    return successResponse;
   } catch (err: any) {
     console.error("[verify-otp error]:", err?.message || err);
     return NextResponse.json(

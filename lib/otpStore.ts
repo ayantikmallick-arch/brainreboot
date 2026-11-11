@@ -1,17 +1,16 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { getFirebaseAdmin } from "./firebaseAdmin";
 
 export interface PendingVerificationRecord {
   id: string;
   email: string;
   name: string;
+  password: string;
   otpHashed: string;
   salt: string;
-  encryptedPassword: string;
-  iv: string;
-  tag: string;
   attempts: number;
   createdAt: number;
   expiresAt: number;
@@ -19,43 +18,62 @@ export interface PendingVerificationRecord {
   used: boolean;
 }
 
-// Secret key for AES-256-GCM password encryption
+// 32-byte secret key for AES-256-GCM encryption
 function getEncryptionKey(): Buffer {
   const secret =
     process.env.OTP_ENCRYPTION_SECRET ||
     process.env.RESEND_API_KEY ||
-    process.env.FIREBASE_PROJECT_ID ||
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
     "brainflow-secure-encryption-key-v1-32bytes-long";
 
   return crypto.createHash("sha256").update(secret).digest();
 }
 
-function encryptPassword(password: string): { encrypted: string; iv: string; tag: string } {
+/**
+ * Encrypt a verification record into a tamper-proof AES-256-GCM token.
+ */
+export function sealVerificationToken(record: PendingVerificationRecord): string {
   const key = getEncryptionKey();
-  const iv = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
 
-  let encrypted = cipher.update(password, "utf8", "hex");
+  const payload = JSON.stringify(record);
+  let encrypted = cipher.update(payload, "utf8", "hex");
   encrypted += cipher.final("hex");
   const tag = cipher.getAuthTag().toString("hex");
 
-  return {
-    encrypted,
-    iv: iv.toString("hex"),
-    tag,
-  };
+  return `${iv.toString("hex")}:${tag}:${encrypted}`;
 }
 
-export function decryptPassword(encrypted: string, ivHex: string, tagHex: string): string {
-  const key = getEncryptionKey();
-  const iv = Buffer.from(ivHex, "hex");
-  const tag = Buffer.from(tagHex, "hex");
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
+/**
+ * Decrypt and verify the AES-256-GCM verification token.
+ */
+export function unsealVerificationToken(token: string): PendingVerificationRecord | null {
+  try {
+    const parts = token.split(":");
+    if (parts.length !== 3) return null;
 
-  let decrypted = decipher.update(encrypted, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-  return decrypted;
+    const [ivHex, tagHex, encrypted] = parts;
+    const key = getEncryptionKey();
+    const iv = Buffer.from(ivHex, "hex");
+    const tag = Buffer.from(tagHex, "hex");
+
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+
+    let decrypted = decipher.update(encrypted, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+
+    const record: PendingVerificationRecord = JSON.parse(decrypted);
+
+    if (!record.email || !record.otpHashed || !record.salt) {
+      return null;
+    }
+
+    return record;
+  } catch {
+    return null;
+  }
 }
 
 // Generate cryptographically secure random 6-digit OTP
@@ -72,40 +90,46 @@ function getEmailDocKey(email: string): string {
   return crypto.createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
 }
 
-// Local fallback store path for offline development when service account credentials are not configured
-const LOCAL_DEV_STORE_PATH = path.join(process.cwd(), ".otp_local_store.json");
+// In-memory cache for fast access within the same serverless instance
+const memoryStore = new Map<string, PendingVerificationRecord>();
 
-function readLocalDevStore(): Record<string, PendingVerificationRecord> {
+// Safe writable path on Vercel / serverless (/tmp) or local OS tmpdir
+const TMP_STORE_PATH = path.join(os.tmpdir(), "brainflow_pending_verifications.json");
+
+function readDiskCache(): Record<string, PendingVerificationRecord> {
   try {
-    if (fs.existsSync(LOCAL_DEV_STORE_PATH)) {
-      const data = fs.readFileSync(LOCAL_DEV_STORE_PATH, "utf8");
+    if (fs.existsSync(TMP_STORE_PATH)) {
+      const data = fs.readFileSync(TMP_STORE_PATH, "utf8");
       return JSON.parse(data);
     }
   } catch {}
   return {};
 }
 
-function writeLocalDevStore(store: Record<string, PendingVerificationRecord>) {
+function writeDiskCache(store: Record<string, PendingVerificationRecord>) {
   try {
-    fs.writeFileSync(LOCAL_DEV_STORE_PATH, JSON.stringify(store, null, 2), "utf8");
+    fs.writeFileSync(TMP_STORE_PATH, JSON.stringify(store), "utf8");
   } catch {}
 }
 
 /**
- * Save or update a pending verification record in Firestore (with local dev fallback)
+ * Save or update a pending verification record
  */
-export async function savePendingVerification(
-  params: {
-    email: string;
-    name: string;
-    password: string;
-    otp: string;
-  }
-): Promise<{ success: boolean; verificationId: string; expiresAt: number; resendAfter: number; error?: string }> {
+export async function savePendingVerification(params: {
+  email: string;
+  name: string;
+  password: string;
+  otp: string;
+}): Promise<{
+  success: boolean;
+  verificationToken: string;
+  verificationId: string;
+  expiresAt: number;
+  resendAfter: number;
+}> {
   const normalizedEmail = params.email.trim().toLowerCase();
   const salt = crypto.randomBytes(16).toString("hex");
   const otpHashed = hashOtp(params.otp, salt);
-  const { encrypted, iv, tag } = encryptPassword(params.password);
 
   const now = Date.now();
   const expiresAt = now + 5 * 60 * 1000; // 5 minutes expiration
@@ -116,11 +140,9 @@ export async function savePendingVerification(
     id: verificationId,
     email: normalizedEmail,
     name: params.name.trim(),
+    password: params.password,
     otpHashed,
     salt,
-    encryptedPassword: encrypted,
-    iv,
-    tag,
     attempts: 0,
     createdAt: now,
     expiresAt,
@@ -129,162 +151,189 @@ export async function savePendingVerification(
   };
 
   const docKey = getEmailDocKey(normalizedEmail);
-  const { db, hasCredentials } = getFirebaseAdmin();
 
-  // Try saving to persistent Firestore
+  // 1. Update memory cache
+  memoryStore.set(docKey, record);
+
+  // 2. Update /tmp disk cache
+  const disk = readDiskCache();
+  disk[docKey] = record;
+  writeDiskCache(disk);
+
+  // 3. Update Firestore if credentials exist
+  const { db, hasCredentials } = getFirebaseAdmin();
   if (hasCredentials && db) {
     try {
       await db.collection("pending_verifications").doc(docKey).set(record);
-      return { success: true, verificationId, expiresAt, resendAfter };
     } catch (err: any) {
-      console.warn("[OTP Store] Firestore write warning, using local dev persistence fallback:", err?.message || err);
+      console.warn("[Firestore] Non-fatal write warning:", err?.message || err);
     }
   }
 
-  // Local fallback persistence for development
-  const localStore = readLocalDevStore();
-  localStore[docKey] = record;
-  writeLocalDevStore(localStore);
+  // 4. Seal into AES-256-GCM stateless token
+  const verificationToken = sealVerificationToken(record);
 
-  return { success: true, verificationId, expiresAt, resendAfter };
+  return {
+    success: true,
+    verificationToken,
+    verificationId,
+    expiresAt,
+    resendAfter,
+  };
 }
 
 /**
- * Fetch a pending verification record by email
+ * Fetch a pending verification record by email or token
  */
-export async function getPendingVerification(email: string): Promise<PendingVerificationRecord | null> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const docKey = getEmailDocKey(normalizedEmail);
-  const { db, hasCredentials } = getFirebaseAdmin();
+export async function getPendingVerification(
+  emailOrDocKey: string,
+  token?: string | null
+): Promise<PendingVerificationRecord | null> {
+  // If an encrypted token is provided, verify and unseal it
+  if (token) {
+    const unsealed = unsealVerificationToken(token);
+    if (unsealed) {
+      return unsealed;
+    }
+  }
 
+  const normalized = emailOrDocKey.trim().toLowerCase();
+  const docKey = normalized.includes("@") ? getEmailDocKey(normalized) : normalized;
+
+  // 1. Check memory store
+  if (memoryStore.has(docKey)) {
+    const record = memoryStore.get(docKey)!;
+    if (Date.now() <= record.expiresAt) {
+      return record;
+    }
+    memoryStore.delete(docKey);
+  }
+
+  // 2. Check /tmp disk cache
+  const disk = readDiskCache();
+  if (disk[docKey]) {
+    const record = disk[docKey];
+    if (Date.now() <= record.expiresAt) {
+      return record;
+    }
+  }
+
+  // 3. Check Firestore if credentials exist
+  const { db, hasCredentials } = getFirebaseAdmin();
   if (hasCredentials && db) {
     try {
       const snap = await db.collection("pending_verifications").doc(docKey).get();
       if (snap.exists) {
         return snap.data() as PendingVerificationRecord;
       }
-    } catch (err: any) {
-      // Fall through to local store
-    }
-  }
-
-  const localStore = readLocalDevStore();
-  return localStore[docKey] || null;
-}
-
-/**
- * Record a failed attempt
- */
-export async function incrementFailedAttempt(email: string): Promise<{ remainingAttempts: number; isLocked: boolean }> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const docKey = getEmailDocKey(normalizedEmail);
-  const record = await getPendingVerification(normalizedEmail);
-
-  if (!record) {
-    return { remainingAttempts: 0, isLocked: true };
-  }
-
-  const newAttempts = record.attempts + 1;
-  const isLocked = newAttempts >= 5;
-  const remainingAttempts = Math.max(0, 5 - newAttempts);
-
-  const { db, hasCredentials } = getFirebaseAdmin();
-  if (hasCredentials && db) {
-    try {
-      await db.collection("pending_verifications").doc(docKey).update({
-        attempts: newAttempts,
-      });
     } catch {}
   }
 
-  const localStore = readLocalDevStore();
-  if (localStore[docKey]) {
-    localStore[docKey].attempts = newAttempts;
-    writeLocalDevStore(localStore);
-  }
-
-  return { remainingAttempts, isLocked };
+  return null;
 }
 
 /**
- * Mark verification record as used/completed
- */
-export async function markVerificationUsed(email: string): Promise<void> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const docKey = getEmailDocKey(normalizedEmail);
-  const { db, hasCredentials } = getFirebaseAdmin();
-
-  if (hasCredentials && db) {
-    try {
-      await db.collection("pending_verifications").doc(docKey).update({
-        used: true,
-      });
-      // Optionally delete after brief delay or mark used
-      await db.collection("pending_verifications").doc(docKey).delete().catch(() => {});
-    } catch {}
-  }
-
-  const localStore = readLocalDevStore();
-  if (localStore[docKey]) {
-    delete localStore[docKey];
-    writeLocalDevStore(localStore);
-  }
-}
-
-/**
- * Update an existing record with a newly generated OTP (for resend)
+ * Refresh an existing pending verification with a new OTP
  */
 export async function refreshPendingOtp(
   email: string,
-  newOtp: string
-): Promise<{ success: boolean; resendAfter: number; expiresAt: number; error?: string }> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const record = await getPendingVerification(normalizedEmail);
-
-  if (!record) {
-    return { success: false, resendAfter: 0, expiresAt: 0, error: "No pending registration found for this email." };
+  newOtp: string,
+  token?: string | null
+): Promise<{
+  success: boolean;
+  verificationToken?: string;
+  resendAfter?: number;
+  expiresAt?: number;
+  error?: string;
+}> {
+  const existing = await getPendingVerification(email, token);
+  if (!existing || existing.used) {
+    return { success: false, error: "No active verification found. Please sign up again." };
   }
 
   const now = Date.now();
-  if (now < record.resendAfter) {
-    const remainingSeconds = Math.ceil((record.resendAfter - now) / 1000);
-    return {
-      success: false,
-      resendAfter: record.resendAfter,
-      expiresAt: record.expiresAt,
-      error: `Please wait ${remainingSeconds} seconds before requesting a new code.`,
-    };
-  }
+  const salt = crypto.randomBytes(16).toString("hex");
+  const otpHashed = hashOtp(newOtp, salt);
 
-  const newSalt = crypto.randomBytes(16).toString("hex");
-  const newOtpHashed = hashOtp(newOtp, newSalt);
-  const expiresAt = now + 5 * 60 * 1000;
-  const resendAfter = now + 60 * 1000;
+  existing.otpHashed = otpHashed;
+  existing.salt = salt;
+  existing.attempts = 0;
+  existing.resendAfter = now + 60 * 1000;
+  existing.expiresAt = now + 5 * 60 * 1000;
 
-  const updatedRecord: PendingVerificationRecord = {
-    ...record,
-    otpHashed: newOtpHashed,
-    salt: newSalt,
-    attempts: 0, // reset attempts on newly issued code
-    createdAt: now,
-    expiresAt,
-    resendAfter,
-    used: false,
-  };
+  const docKey = getEmailDocKey(email);
+  memoryStore.set(docKey, existing);
 
-  const docKey = getEmailDocKey(normalizedEmail);
+  const disk = readDiskCache();
+  disk[docKey] = existing;
+  writeDiskCache(disk);
+
   const { db, hasCredentials } = getFirebaseAdmin();
-
   if (hasCredentials && db) {
     try {
-      await db.collection("pending_verifications").doc(docKey).set(updatedRecord);
-      return { success: true, resendAfter, expiresAt };
+      await db.collection("pending_verifications").doc(docKey).set(existing);
     } catch {}
   }
 
-  const localStore = readLocalDevStore();
-  localStore[docKey] = updatedRecord;
-  writeLocalDevStore(localStore);
+  const verificationToken = sealVerificationToken(existing);
 
-  return { success: true, resendAfter, expiresAt };
+  return {
+    success: true,
+    verificationToken,
+    resendAfter: existing.resendAfter,
+    expiresAt: existing.expiresAt,
+  };
+}
+
+/**
+ * Increment failed attempt counter
+ */
+export async function incrementFailedAttempt(
+  record: PendingVerificationRecord
+): Promise<{ remainingAttempts: number; isLocked: boolean; updatedToken: string }> {
+  record.attempts += 1;
+  const isLocked = record.attempts >= 5;
+  const remainingAttempts = Math.max(0, 5 - record.attempts);
+
+  const docKey = getEmailDocKey(record.email);
+  memoryStore.set(docKey, record);
+
+  const disk = readDiskCache();
+  disk[docKey] = record;
+  writeDiskCache(disk);
+
+  const { db, hasCredentials } = getFirebaseAdmin();
+  if (hasCredentials && db) {
+    try {
+      await db.collection("pending_verifications").doc(docKey).update({
+        attempts: record.attempts,
+      });
+    } catch {}
+  }
+
+  const updatedToken = sealVerificationToken(record);
+  return { remainingAttempts, isLocked, updatedToken };
+}
+
+/**
+ * Mark a record as used
+ */
+export async function markVerificationUsed(
+  record: PendingVerificationRecord
+): Promise<void> {
+  record.used = true;
+  const docKey = getEmailDocKey(record.email);
+
+  memoryStore.delete(docKey);
+
+  const disk = readDiskCache();
+  delete disk[docKey];
+  writeDiskCache(disk);
+
+  const { db, hasCredentials } = getFirebaseAdmin();
+  if (hasCredentials && db) {
+    try {
+      await db.collection("pending_verifications").doc(docKey).delete();
+    } catch {}
+  }
 }

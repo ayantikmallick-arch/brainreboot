@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 
 const ResendOtpSchema = z.object({
   email: z.string().email("Please provide a valid email address."),
+  verificationToken: z.string().optional(),
 });
 
 function maskEmail(email: string): string {
@@ -35,7 +36,12 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedEmail = parsed.data.email.trim().toLowerCase();
-    const existing = await getPendingVerification(normalizedEmail);
+    const token =
+      parsed.data.verificationToken ||
+      req.cookies.get("__bf_pending_verif")?.value ||
+      null;
+
+    const existing = await getPendingVerification(normalizedEmail, token);
 
     if (!existing || existing.used) {
       return NextResponse.json(
@@ -58,7 +64,7 @@ export async function POST(req: NextRequest) {
 
     // Generate fresh secure 6-digit OTP
     const newOtp = generateSecureOtp();
-    const refreshResult = await refreshPendingOtp(normalizedEmail, newOtp);
+    const refreshResult = await refreshPendingOtp(normalizedEmail, newOtp, token);
 
     if (!refreshResult.success) {
       return NextResponse.json(
@@ -81,13 +87,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: "A new 6-digit verification code has been sent to your email.",
       maskedEmail: maskEmail(normalizedEmail),
+      verificationToken: refreshResult.verificationToken,
       resendAfter: refreshResult.resendAfter,
       expiresAt: refreshResult.expiresAt,
     });
+
+    if (refreshResult.verificationToken) {
+      response.cookies.set("__bf_pending_verif", refreshResult.verificationToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/api/auth",
+        maxAge: 5 * 60,
+      });
+    }
+
+    return response;
   } catch (err: any) {
     console.error("[resend-otp error]:", err?.message || err);
     return NextResponse.json(

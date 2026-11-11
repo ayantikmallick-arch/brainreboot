@@ -136,14 +136,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: "Verification code sent to your email.",
       maskedEmail: maskEmail(normalizedEmail),
       verificationId: saveResult.verificationId,
+      verificationToken: saveResult.verificationToken,
       expiresAt: saveResult.expiresAt,
       resendAfter: saveResult.resendAfter,
     });
+
+    // Set secure HttpOnly cookie with the encrypted verification token
+    response.cookies.set("__bf_pending_verif", saveResult.verificationToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/api/auth",
+      maxAge: 5 * 60, // 5 minutes
+    });
+
+    return response;
   } catch (err: any) {
     console.error("[send-otp error]:", err?.message || err);
     return NextResponse.json(
