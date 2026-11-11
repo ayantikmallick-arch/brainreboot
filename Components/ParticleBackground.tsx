@@ -24,7 +24,7 @@ export default function ParticleBackground() {
     let particles: Particle[] = [];
 
     const resizeCanvas = () => {
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = `${window.innerWidth}px`;
@@ -33,13 +33,18 @@ export default function ParticleBackground() {
     };
 
     const initParticles = () => {
-      const count = Math.min(65, Math.floor(window.innerWidth / 24));
+      const isMobile = window.innerWidth < 640;
+      // Optimize particle count for mobile battery and frame rate
+      const count = isMobile
+        ? Math.min(26, Math.max(16, Math.floor(window.innerWidth / 15)))
+        : Math.min(60, Math.floor(window.innerWidth / 24));
+
       particles = Array.from({ length: count }, () => ({
         x: Math.random() * window.innerWidth,
         y: Math.random() * window.innerHeight,
-        vx: (Math.random() - 0.5) * 0.35,
-        vy: (Math.random() - 0.5) * 0.35,
-        r: Math.random() * 1.8 + 1.2,
+        vx: (Math.random() - 0.5) * (isMobile ? 0.25 : 0.35),
+        vy: (Math.random() - 0.5) * (isMobile ? 0.25 : 0.35),
+        r: Math.random() * 1.6 + 1.1,
       }));
     };
 
@@ -48,6 +53,9 @@ export default function ParticleBackground() {
     const drawParticles = () => {
       if (prefersReducedMotion) return;
       ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+      const isMobile = window.innerWidth < 640;
+      const maxDistance = isMobile ? 90 : 130;
 
       // Update positions
       for (const p of particles) {
@@ -63,8 +71,8 @@ export default function ParticleBackground() {
           const a = particles[i];
           const b = particles[j];
           const d = Math.hypot(a.x - b.x, a.y - b.y);
-          if (d < 130) {
-            ctx.strokeStyle = `rgba(34, 193, 255, ${(1 - d / 130) * 0.18})`;
+          if (d < maxDistance) {
+            ctx.strokeStyle = `rgba(34, 193, 255, ${(1 - d / maxDistance) * (isMobile ? 0.14 : 0.18)})`;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
@@ -76,14 +84,15 @@ export default function ParticleBackground() {
 
       // Draw glowing particle nodes
       for (const p of particles) {
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 4.5);
+        const glowRadius = isMobile ? p.r * 3.5 : p.r * 4.5;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
         g.addColorStop(0, "rgba(34, 193, 255, 0.9)");
         g.addColorStop(0.35, "rgba(139, 92, 246, 0.55)");
         g.addColorStop(1, "rgba(192, 38, 211, 0)");
 
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r * 4.5, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
         ctx.fill();
 
         // Center bright dot

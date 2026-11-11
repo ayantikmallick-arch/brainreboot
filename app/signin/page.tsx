@@ -67,12 +67,12 @@ export default function AuthPage() {
   };
 
   return (
-    <main className="min-h-screen relative flex items-center justify-center p-4 sm:p-6 overflow-hidden bg-[#0a0e1a]">
+    <main className="min-h-screen min-h-[100dvh] relative flex items-center justify-center p-3.5 sm:p-6 overflow-hidden bg-[#0a0e1a]">
       {/* Interactive Constellation Motion Background */}
       <ParticleBackground />
 
       {/* Floating Glassmorphic Auth Card */}
-      <div className="relative z-10 w-full max-w-[410px] bg-[#10162a]/85 border border-[#232b48] rounded-[22px] p-7 sm:p-9 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl animate-rise">
+      <div className="relative z-10 w-full max-w-[410px] bg-[#10162a]/85 border border-[#232b48] rounded-2xl sm:rounded-[22px] p-5 sm:p-8 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl animate-rise">
         {/* Brand Header */}
         <div className="flex flex-col items-center justify-center mb-6">
           <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center shadow-[0_0_25px_rgba(139,92,246,0.5)] overflow-hidden mb-3 animate-breathe p-1">
@@ -141,7 +141,7 @@ export default function AuthPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[#232b48] bg-[#0d1226] text-[#eef2ff] placeholder-[#4a5484] text-sm outline-none focus:border-[#8b5cf6] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.18)] transition"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#232b48] bg-[#0d1226] text-[#eef2ff] placeholder-[#4a5484] text-base sm:text-sm outline-none focus:border-[#8b5cf6] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.18)] transition"
             />
           </div>
 
@@ -155,7 +155,7 @@ export default function AuthPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[#232b48] bg-[#0d1226] text-[#eef2ff] placeholder-[#4a5484] text-sm outline-none focus:border-[#8b5cf6] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.18)] transition"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#232b48] bg-[#0d1226] text-[#eef2ff] placeholder-[#4a5484] text-base sm:text-sm outline-none focus:border-[#8b5cf6] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.18)] transition"
             />
           </div>
 

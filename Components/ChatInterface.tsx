@@ -469,7 +469,7 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
   const currentTitle = currentChat ? currentChat.title : "New chat";
 
   return (
-    <main className="h-screen w-screen bg-[#0a0e1a] text-[#eef2ff] flex overflow-hidden relative selection:bg-[#8b5cf6]/30 selection:text-[#22c1ff]">
+    <main className="h-screen h-[100dvh] w-screen bg-[#0a0e1a] text-[#eef2ff] flex overflow-hidden relative selection:bg-[#8b5cf6]/30 selection:text-[#22c1ff]">
       {/* Dynamic Motion Constellation Background */}
       <ParticleBackground />
 
@@ -482,16 +482,13 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
         className="hidden"
       />
 
-      {/* Mobile Sidebar Toggle Overlay */}
-      <button
-        onClick={() => setSidebarOpen(true)}
-        className="md:hidden fixed top-3.5 left-3.5 z-50 bg-[#10162a]/90 border border-[#232b48] p-2 rounded-xl text-[#8b93b8] hover:text-white"
-        title="Open Sidebar"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-        </svg>
-      </button>
+      {/* Mobile Backdrop Overlay */}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-30 transition-opacity"
+        />
+      )}
 
       {/* Left Sidebar */}
       <aside
@@ -743,14 +740,23 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
       {/* Main Chat Area */}
       <section className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
         {/* Top Bar */}
-        <header className="h-14 border-b border-[#232b48] px-4 sm:px-6 flex items-center justify-between bg-[#0c1020]/50 backdrop-blur-md">
-          <div className="flex items-center gap-3 pl-9 md:pl-0">
-            <h2 className="text-sm sm:text-base font-semibold text-white tracking-tight truncate max-w-md normal-case font-display">
+        <header className="h-14 border-b border-[#232b48] px-3 sm:px-6 flex items-center justify-between bg-[#0c1020]/80 backdrop-blur-md flex-shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden p-2 rounded-xl border border-[#232b48] bg-[#10162a]/90 text-[#8b93b8] hover:text-white hover:border-[#8b5cf6] transition flex-shrink-0"
+              title="Open Sidebar"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            </button>
+            <h2 className="text-sm sm:text-base font-semibold text-white tracking-tight truncate max-w-[200px] sm:max-w-md normal-case font-display">
               {currentTitle}
             </h2>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={() => setSettingsOpen(true)}
               className="p-2 rounded-xl border border-[#232b48] text-[#8b93b8] hover:text-white hover:border-[#8b5cf6] hover:bg-[rgba(139,92,246,0.12)] transition"
@@ -765,7 +771,7 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
         </header>
 
         {/* Message View Area */}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6">
           {messages.length === 0 ? (
             /* Empty State */
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center max-w-lg mx-auto">
@@ -816,7 +822,7 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                 if (msg.role === "user") {
                   return (
                     <div key={index} className="flex justify-end">
-                      <div className="max-w-[78%] bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] text-white px-5 py-3 rounded-2xl rounded-br-sm shadow-md font-medium text-sm leading-relaxed break-words whitespace-pre-wrap">
+                      <div className="max-w-[88%] sm:max-w-[78%] bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-2xl rounded-br-sm shadow-md font-medium text-xs sm:text-sm leading-relaxed break-words whitespace-pre-wrap">
                         {msg.content}
                       </div>
                     </div>
@@ -831,7 +837,7 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <div className="w-full bg-[#161d35]/90 border border-[#232b48] text-[#eef2ff] px-5 py-4 rounded-2xl rounded-bl-sm text-sm leading-relaxed break-words shadow-lg backdrop-blur-sm">
+                      <div className="w-full bg-[#161d35]/90 border border-[#232b48] text-[#eef2ff] px-4 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-bl-sm text-xs sm:text-sm leading-relaxed break-words shadow-lg backdrop-blur-sm">
                         <ReactMarkdown
                           components={{
                             p: ({ children }) => <p className="mb-2.5 last:mb-0">{children}</p>,
@@ -934,7 +940,7 @@ blockquote: ({ children }) => (
         </div>
 
         {/* Bottom Composer Input Bar */}
-        <div className="p-3 sm:p-5 border-t border-[#232b48] bg-[#0c1020]/80 backdrop-blur-md">
+        <div className="p-2.5 sm:p-5 pb-[max(0.625rem,env(safe-area-inset-bottom))] border-t border-[#232b48] bg-[#0c1020]/80 backdrop-blur-md">
           <div className="max-w-4xl mx-auto">
             {/* Attachment preview strip */}
             {attachedFiles.length > 0 && (
@@ -985,14 +991,14 @@ blockquote: ({ children }) => (
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={attachedFiles.length > 0 ? "Add your instructions or prompt..." : "Message BrainFlow..."}
                 disabled={loading}
-                className="flex-1 bg-transparent border-none outline-none text-[#eef2ff] placeholder-[#8b93b8] text-sm leading-relaxed"
+                className="flex-1 bg-transparent border-none outline-none text-[#eef2ff] placeholder-[#8b93b8] text-base sm:text-sm leading-relaxed"
               />
 
               {/* Send Button */}
               <button
                 type="submit"
                 disabled={loading || (!input.trim() && attachedFiles.length === 0)}
-                className="w-9 h-9 rounded-xl bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] text-white flex items-center justify-center hover:brightness-110 active:scale-95 transition shadow-[0_0_15px_rgba(139,92,246,0.4)] disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] text-white flex items-center justify-center hover:brightness-110 active:scale-95 transition shadow-[0_0_15px_rgba(139,92,246,0.4)] disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
                 title="Send"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 -rotate-45 ml-0.5">
