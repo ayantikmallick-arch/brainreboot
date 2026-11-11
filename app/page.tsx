@@ -286,10 +286,12 @@ export default function LandingPage() {
             <span>&copy; 2026 Ayantik Mallick</span>
           </div>
 
-          <div className="flex items-center gap-5 text-[#8b93b8]">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-[#8b93b8]">
             <Link href="/chat" className="hover:text-white transition">Chat</Link>
             <Link href="/signin" className="hover:text-white transition">Sign in</Link>
-            <Link href="/privacy" className="hover:text-white transition">Privacy</Link>
+            <Link href="/privacy-policy" className="hover:text-white transition">Privacy Policy</Link>
+            <Link href="/terms-of-service" className="hover:text-white transition">Terms of Service</Link>
+            <Link href="/cookie-policy" className="hover:text-white transition">Cookie Policy</Link>
           </div>
         </div>
       </footer>

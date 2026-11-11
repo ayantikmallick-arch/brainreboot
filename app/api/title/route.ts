@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { executeRotatoCompletion } from "@/lib/rotato";
 
 export const runtime = "nodejs";
+
+const TitleBodySchema = z.object({
+  prompt: z.string().min(1).max(3000),
+});
 
 function toTitleCase(str: string): string {
   const smallWords = new Set([
@@ -20,13 +25,20 @@ function toTitleCase(str: string): string {
     .join(" ");
 }
 
+function sanitizeTitleInput(text: string): string {
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { prompt } = await req.json().catch(() => ({}));
+    const rawBody = await req.json().catch(() => null);
+    const parseResult = TitleBodySchema.safeParse(rawBody);
 
-    if (!prompt || typeof prompt !== "string") {
+    if (!parseResult.success) {
       return NextResponse.json({ title: "New Conversation" });
     }
+
+    const cleanPrompt = sanitizeTitleInput(parseResult.data.prompt);
 
     const systemPrompt =
       "You are a conversation title generator. Output a concise 3 to 5 word topic title in Title Case (e.g. 'Locating Lost Website', 'Clean C Drive Space', 'Coding Assistance') summarizing the user request. Never output all caps, never use quotes or punctuation. Output ONLY the title.";
@@ -34,7 +46,7 @@ export async function POST(req: NextRequest) {
     const result = await executeRotatoCompletion({
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: prompt.slice(0, 300) },
+        { role: "user", content: cleanPrompt.slice(0, 300) },
       ],
     }).catch(() => null);
 
@@ -42,7 +54,7 @@ export async function POST(req: NextRequest) {
     let cleanTitle = raw.trim().replace(/^["']|["']$/g, "").split("\n")[0].trim();
 
     if (!cleanTitle || cleanTitle.length < 2 || cleanTitle.length > 50) {
-      const words = prompt.trim().split(/\s+/).slice(0, 5).join(" ");
+      const words = cleanPrompt.split(/\s+/).slice(0, 5).join(" ");
       cleanTitle = words;
     }
 
@@ -50,7 +62,7 @@ export async function POST(req: NextRequest) {
     cleanTitle = toTitleCase(cleanTitle);
 
     return NextResponse.json({ title: cleanTitle });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ title: "New Conversation" });
   }
 }

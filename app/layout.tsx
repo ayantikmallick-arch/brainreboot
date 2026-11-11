@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
+import CookieConsent from "@/Components/CookieConsent";
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-space-grotesk",
@@ -36,6 +37,7 @@ export default function RootLayout({
         className="min-h-full flex flex-col bg-[#0a0e1a] text-[#eef2ff]"
       >
         {children}
+        <CookieConsent />
       </body>
     </html>
   );

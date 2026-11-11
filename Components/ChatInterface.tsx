@@ -1073,6 +1073,15 @@ blockquote: ({ children }) => (
               </button>
             </div>
 
+            {/* Legal & Compliance Links */}
+            <div className="pt-2 border-t border-[#232b48] flex items-center justify-between text-[11px] text-[#4a5484]">
+              <Link href="/privacy-policy" target="_blank" className="hover:text-[#8b93b8] transition">Privacy Policy</Link>
+              <span>&middot;</span>
+              <Link href="/terms-of-service" target="_blank" className="hover:text-[#8b93b8] transition">Terms of Service</Link>
+              <span>&middot;</span>
+              <Link href="/cookie-policy" target="_blank" className="hover:text-[#8b93b8] transition">Cookie Policy</Link>
+            </div>
+
             <button
               onClick={() => setSettingsOpen(false)}
               className="w-full py-2 rounded-xl bg-[#161d35] hover:bg-[#232b48] text-white font-semibold text-xs transition"

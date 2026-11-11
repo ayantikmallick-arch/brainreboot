@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import {
   ChatMessage,
   executeRotatoCompletion,
@@ -17,6 +18,25 @@ Identity Guidelines:
 - NEVER claim to be ChatGPT, OpenAI, Anthropic, Gemini, or any other company's bot.
 - You help users with coding, mathematics, research, writing, file analysis, and creative thinking with clear, elegant markdown formatting.`,
 };
+
+// Strict Zod Validation Schema
+const MessageItemSchema = z.object({
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.string().max(25000),
+});
+
+const ChatBodySchema = z.object({
+  message: z.string().max(20000).optional(),
+  messages: z.array(MessageItemSchema).max(60).optional(),
+  provider: z.string().max(50).optional(),
+  model: z.string().max(100).optional(),
+  stream: z.boolean().optional(),
+});
+
+function sanitizeInput(text: string): string {
+  // Strip null bytes and dangerous control characters while preserving valid formatting
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+}
 
 // In-memory rate limiting map: ip -> timestamps[]
 const rateLimitMap = new Map<string, number[]>();
@@ -67,32 +87,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Parse Body with Safety Check
-    const body = await req.json().catch(() => ({}));
+    // 2. Parse & Validate Body using Zod
+    const rawBody = await req.json().catch(() => null);
+    if (!rawBody) {
+      return NextResponse.json(
+        { error: "Invalid JSON request payload." },
+        { status: 400 }
+      );
+    }
+
+    const parseResult = ChatBodySchema.safeParse(rawBody);
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { error: "Invalid payload format.", details: parseResult.error.issues.map((i) => i.message) },
+        { status: 400 }
+      );
+    }
+
     const {
       message,
       messages,
       provider,
       model,
       stream = true,
-    } = body;
+    } = parseResult.data;
 
-    // 3. Validate and Format Messages
+    // 3. Format and Sanitize Messages
     let formattedMessages: ChatMessage[] = [];
-    if (Array.isArray(messages) && messages.length > 0) {
-      // Guard against payload bomb (max 60 messages)
+    if (messages && messages.length > 0) {
       const sliced = messages.slice(-50);
       let totalLength = 0;
 
       for (const m of sliced) {
-        const rawContent = String(m.content || "");
-        // Max 20,000 chars per message
-        const sanitizedContent = rawContent.slice(0, 20000);
-        totalLength += sanitizedContent.length;
+        const sanitized = sanitizeInput(m.content);
+        totalLength += sanitized.length;
 
         formattedMessages.push({
-          role: m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
-          content: sanitizedContent,
+          role: m.role,
+          content: sanitized,
         });
       }
 
@@ -103,8 +135,8 @@ export async function POST(req: NextRequest) {
           { status: 413 }
         );
       }
-    } else if (typeof message === "string" && message.trim().length > 0) {
-      formattedMessages = [{ role: "user", content: message.trim().slice(0, 20000) }];
+    } else if (message && message.trim().length > 0) {
+      formattedMessages = [{ role: "user", content: sanitizeInput(message) }];
     } else {
       return NextResponse.json(
         { error: "A non-empty message or messages array is required." },
@@ -215,7 +247,8 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error("[Chat Route Error]:", error);
+    // Sanitize logger: Avoid dumping raw payloads, tokens, or PII into logs
+    console.error("[Chat Route Error]:", error?.message || "Internal processing error");
     return NextResponse.json(
       {
         error: "Failed to process chat request.",
