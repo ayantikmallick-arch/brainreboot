@@ -6,6 +6,15 @@ export interface SendOtpEmailParams {
   name?: string;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function sendOtpEmail({
   email,
   otp,
@@ -25,103 +34,101 @@ export async function sendOtpEmail({
 
   try {
     const resend = new Resend(apiKey);
-    const greeting = name?.trim() ? `Hello ${name.trim()},` : "Hello,";
+    const trimmedName = name?.trim();
+    const greetingText = trimmedName ? `Hi ${trimmedName},` : "Hi there,";
+    const greetingHtml = escapeHtml(greetingText);
+    const safeOtp = escapeHtml(otp);
 
-    const htmlContent = `
-<!DOCTYPE html>
+    const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Your BrainFlow Verification Code</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BrainFlow Verification Code</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #0a0e1a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #eef2ff;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0a0e1a; padding: 40px 15px;">
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; font-family: Arial, Helvetica, sans-serif; color: #333333;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="background-color: #ffffff;">
     <tr>
-      <td align="center">
-        <!-- Main Card Container -->
-        <table role="presentation" width="100%" style="max-width: 520px; background-color: #10162a; border: 1px solid #232b48; border-radius: 20px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.6);" cellspacing="0" cellpadding="0">
-          
-          <!-- Header Banner -->
+      <td align="left" style="padding: 28px 20px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" align="left" style="max-width: 600px; width: 100%; background-color: #ffffff;">
           <tr>
-            <td style="padding: 35px 35px 20px 35px; text-align: center; border-bottom: 1px solid #1a223f;">
-              <div style="display: inline-block; padding: 3px; background: linear-gradient(135deg, #22c1ff, #8b5cf6, #c026d3); border-radius: 14px; margin-bottom: 12px;">
-                <div style="background-color: #ffffff; width: 44px; height: 44px; border-radius: 11px; text-align: center; line-height: 44px;">
-                  <span style="font-size: 22px; font-weight: 900; background: linear-gradient(135deg, #22c1ff, #8b5cf6); -webkit-background-clip: text; color: #8b5cf6;">⚡</span>
-                </div>
-              </div>
-              <h1 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">
-                <span style="color: #22c1ff;">Brain</span><span style="color: #c026d3;">Flow</span>
-              </h1>
-              <p style="margin: 5px 0 0 0; font-size: 12px; color: #8b93b8; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">
-                Email Verification
+            <td align="left" style="padding: 0 0 20px 0;">
+              <img src="https://brainflowai.in/logo.png" alt="BrainFlow Logo" width="64" height="64" style="display: block; width: 64px; height: 64px; max-width: 64px; max-height: 64px; object-fit: contain; border: 0; outline: none; text-decoration: none;" />
+            </td>
+          </tr>
+          <tr>
+            <td align="left" style="padding: 0 0 24px 0;">
+              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; line-height: 1.6; color: #333333;">
+                ${greetingHtml}
               </p>
             </td>
           </tr>
-
-          <!-- Content Body -->
           <tr>
-            <td style="padding: 30px 35px;">
-              <p style="margin: 0 0 15px 0; font-size: 15px; color: #eef2ff; font-weight: 600;">
-                ${greeting}
-              </p>
-              <p style="margin: 0 0 25px 0; font-size: 14px; line-height: 1.6; color: #8b93b8;">
-                Thank you for creating an account on <strong style="color: #ffffff;">BrainFlow AI</strong>. Please use the verification code below to verify your email address and activate your account:
-              </p>
-
-              <!-- OTP Code Display Card -->
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin: 20px 0 25px 0;">
-                <tr>
-                  <td align="center">
-                    <div style="background: linear-gradient(135deg, rgba(34, 193, 255, 0.1), rgba(139, 92, 246, 0.15), rgba(192, 38, 211, 0.1)); border: 2px solid #8b5cf6; border-radius: 16px; padding: 22px 20px; text-align: center; max-width: 320px;">
-                      <span style="display: block; font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 900; letter-spacing: 10px; color: #ffffff; text-shadow: 0 0 15px rgba(139, 92, 246, 0.6); padding-left: 10px;">
-                        ${otp}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              </table>
-
-              <!-- Notice Box -->
-              <div style="background-color: #0c1020; border-left: 3px solid #22c1ff; border-radius: 6px; padding: 12px 14px; margin-bottom: 25px;">
-                <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #8b93b8;">
-                  ⏱️ <strong style="color: #22c1ff;">Security Notice:</strong> This one-time code expires in <strong>5 minutes</strong> and can only be used once. Never share this code with anyone.
-                </p>
-              </div>
-
-              <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #4a5484;">
-                If you did not initiate this signup request on BrainFlow, you can safely disregard and delete this email. No account will be activated without this verification code.
+            <td align="left" style="padding: 0 0 24px 0;">
+              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333333;">
+                Use the following one-time password (OTP) to verify your email address and complete your BrainFlow account registration.
               </p>
             </td>
           </tr>
-
-          <!-- Footer -->
           <tr>
-            <td style="padding: 20px 35px 30px 35px; border-top: 1px solid #1a223f; text-align: center;">
-              <p style="margin: 0 0 6px 0; font-size: 11px; color: #4a5484;">
-                BrainFlow AI · Engineered by Ayantik Mallick
-              </p>
-              <p style="margin: 0; font-size: 11px; color: #4a5484;">
-                <a href="https://brainflowai.in" style="color: #22c1ff; text-decoration: none;">brainflowai.in</a> · 
-                <a href="https://brainflowai.in/privacy-policy" style="color: #8b93b8; text-decoration: none;">Privacy</a> · 
-                <a href="https://brainflowai.in/terms-of-service" style="color: #8b93b8; text-decoration: none;">Terms</a>
+            <td align="left" style="padding: 0 0 24px 0;">
+              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 28px; font-weight: 700; letter-spacing: 6px; line-height: 1.4; color: #111827;">
+                ${safeOtp}
               </p>
             </td>
           </tr>
-
+          <tr>
+            <td align="left" style="padding: 0 0 24px 0;">
+              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333333;">
+                This OTP is valid for 5 minutes and can only be used once.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="left" style="padding: 0 0 24px 0;">
+              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #666666;">
+                If you did not request this verification, please ignore this email. Your account will not be activated without successful verification.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="left" style="padding: 0;">
+              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333333;">
+                Regards,<br />
+                The BrainFlow Team
+              </p>
+              <p style="margin: 8px 0 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; line-height: 1.6; color: #666666;">
+                <a href="https://brainflowai.in" style="color: #666666; text-decoration: none;">https://brainflowai.in</a>
+              </p>
+            </td>
+          </tr>
         </table>
       </td>
     </tr>
   </table>
 </body>
-</html>
-    `;
+</html>`;
+
+    const textContent = `${greetingText}
+
+Use the following one-time password (OTP) to verify your email address and complete your BrainFlow account registration.
+
+${otp}
+
+This OTP is valid for 5 minutes and can only be used once.
+
+If you did not request this verification, please ignore this email. Your account will not be activated without successful verification.
+
+Regards,
+The BrainFlow Team
+https://brainflowai.in`;
 
     const { data, error } = await resend.emails.send({
       from: "BrainFlow <verify@brainflowai.in>",
       to: [email],
       subject: `Your BrainFlow Verification Code: ${otp}`,
       html: htmlContent,
+      text: textContent,
     });
 
     if (error) {
