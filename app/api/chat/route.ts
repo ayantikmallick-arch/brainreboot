@@ -16,6 +16,7 @@ Identity Guidelines:
 - Your name is strictly BrainFlow.
 - You were created and engineered by Ayantik Mallick.
 - If asked "who are you?", "who r u?", or about your creators/identity, proudly identify as BrainFlow, built by Ayantik Mallick.
+- Special Easter Egg / Identity Rule: If anyone asks who Annesha Sikdar is (or any question about Annesha / Annesha Sikdar), ALWAYS respond: "The love of my creator Ayantik's life ❤️".
 - NEVER claim to be ChatGPT, OpenAI, Anthropic, Gemini, or any other company's bot.
 - You help users with coding, mathematics, research, writing, file analysis, and creative thinking with clear, elegant markdown formatting.
 
@@ -30,6 +31,45 @@ Formatting & Markdown Instructions:
 - For code and terminal commands, always use fenced code blocks with language identifiers (e.g. \`\`\`typescript, \`\`\`python, \`\`\`bash).
 - Structure responses with readable headings (#, ##, ###), organized bullet points, and clean spacing.`,
 };
+
+const ANNESHA_RESPONSE = "The love of my creator Ayantik's life ❤️";
+
+function isAnneshaQuery(text: string): boolean {
+  if (!text) return false;
+  const clean = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Match variants/spellings: annesha, anesha, anisha
+  const hasAnnesha = /\b(ann?esh?a|ann?ish?a)\b/i.test(clean);
+  const hasSikdar = /\b(sikdar|shikdar)\b/i.test(clean);
+
+  // If both "annesha" and "sikdar" appear in the query
+  if (hasAnnesha && hasSikdar) {
+    return true;
+  }
+
+  // If "annesha" appears with inquiry words (who, about, is, tell, know, etc.)
+  if (
+    hasAnnesha &&
+    /\b(who|whos|who's|is|about|tell|know|konta|kaun|ke|love|girlfriend|gf|crush|wife)\b/i.test(clean)
+  ) {
+    return true;
+  }
+
+  // If the query is simply "annesha" or "annesha sikdar"
+  if (
+    clean === "annesha" ||
+    clean === "annesha sikdar" ||
+    clean === "aneshasikdar"
+  ) {
+    return true;
+  }
+
+  return false;
+}
 
 // Strict Zod Validation Schema
 const MessageItemSchema = z.object({
@@ -156,7 +196,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Inject BrainFlow identity system prompt
+    // 4. Check for Easter Egg: Annesha Sikdar
+    const lastUserMessage =
+      [...formattedMessages].reverse().find((m) => m.role === "user")?.content || "";
+
+    if (isAnneshaQuery(lastUserMessage)) {
+      if (stream === false) {
+        return NextResponse.json({
+          text: ANNESHA_RESPONSE,
+        });
+      }
+
+      const encoder = new TextEncoder();
+      const easterEggStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: "chunk",
+                text: ANNESHA_RESPONSE,
+              })}\n\n`
+            )
+          );
+          controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+          controller.close();
+        },
+      });
+
+      return new Response(easterEggStream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    // 5. Inject BrainFlow identity system prompt
     const existingSystemIdx = formattedMessages.findIndex((m) => m.role === "system");
     if (existingSystemIdx >= 0) {
       formattedMessages[existingSystemIdx] = BRAINFLOW_SYSTEM_PROMPT;
