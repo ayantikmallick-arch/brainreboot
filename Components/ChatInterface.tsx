@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
@@ -58,6 +58,73 @@ function formatMarkdownResponse(content: string): string {
   return text;
 }
 
+export interface ModelOption {
+  id: string;
+  name: string;
+  provider: string;
+  modelId: string;
+  badge?: string;
+  description: string;
+  isPremium: boolean;
+}
+
+export const AVAILABLE_MODELS: ModelOption[] = [
+  {
+    id: "auto",
+    name: "Auto Rotate",
+    provider: "openrouter",
+    modelId: "openrouter/free",
+    badge: "Free Default",
+    description: "Intelligently auto-rotates across providers for reliable, fast answers.",
+    isPremium: false,
+  },
+  {
+    id: "deepseek-chat",
+    name: "DeepSeek Chat",
+    provider: "openrouter",
+    modelId: "deepseek/deepseek-chat",
+    badge: "Pro",
+    description: "DeepSeek V3 — outstanding coding, mathematics & complex reasoning.",
+    isPremium: true,
+  },
+  {
+    id: "llama-3.3-70b",
+    name: "Llama 3.3 70B",
+    provider: "openrouter",
+    modelId: "meta-llama/llama-3.3-70b-instruct",
+    badge: "Pro",
+    description: "Meta's flagship 70B parameter model with state-of-the-art accuracy.",
+    isPremium: true,
+  },
+  {
+    id: "qwen-2.5-72b",
+    name: "Qwen 2.5 72B",
+    provider: "openrouter",
+    modelId: "qwen/qwen-2.5-72b-instruct",
+    badge: "Pro",
+    description: "Alibaba's benchmark leader for code generation, STEM & logic.",
+    isPremium: true,
+  },
+  {
+    id: "gpt-4o-mini",
+    name: "GPT-4o Mini",
+    provider: "openrouter",
+    modelId: "openai/gpt-4o-mini",
+    badge: "Pro",
+    description: "Fast, intelligent, lightweight OpenAI model with broad knowledge.",
+    isPremium: true,
+  },
+  {
+    id: "openrouter-auto",
+    name: "OpenRouter Auto",
+    provider: "openrouter",
+    modelId: "openrouter/auto",
+    badge: "Pro",
+    description: "Dynamic auto-routing across the highest-performing community models.",
+    isPremium: true,
+  },
+];
+
 export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -82,6 +149,88 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
 
   // User auth state
   const [user, setUser] = useState<User | null>(null);
+
+  // Model selection & Admin states
+  const [selectedModelId, setSelectedModelId] = useState<string>("auto");
+  const [adminUnlocked, setAdminUnlocked] = useState<boolean>(false);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [adminPasscodeInput, setAdminPasscodeInput] = useState("");
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminToast, setAdminToast] = useState<string | null>(null);
+  const modelDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // Restore model and admin status from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedAdmin = localStorage.getItem("brainflow_admin_unlocked") === "true";
+      setAdminUnlocked(savedAdmin);
+      const savedModel = localStorage.getItem("brainflow_selected_model");
+      if (savedModel && AVAILABLE_MODELS.some((m) => m.id === savedModel)) {
+        if (!savedAdmin && AVAILABLE_MODELS.find((m) => m.id === savedModel)?.isPremium) {
+          setSelectedModelId("auto");
+        } else {
+          setSelectedModelId(savedModel);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Close model dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setModelDropdownOpen(false);
+      }
+    }
+    if (modelDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [modelDropdownOpen]);
+
+  const handleSelectModel = (model: ModelOption) => {
+    if (model.isPremium && !adminUnlocked) {
+      setModelDropdownOpen(false);
+      setAdminError(null);
+      setAdminModalOpen(true);
+      return;
+    }
+    setSelectedModelId(model.id);
+    setModelDropdownOpen(false);
+    try {
+      localStorage.setItem("brainflow_selected_model", model.id);
+    } catch {}
+  };
+
+  const handleUnlockAdmin = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (adminPasscodeInput.trim() === "admin") {
+      setAdminUnlocked(true);
+      setAdminError(null);
+      setAdminModalOpen(false);
+      setAdminPasscodeInput("");
+      try {
+        localStorage.setItem("brainflow_admin_unlocked", "true");
+      } catch {}
+      setAdminToast("👑 Admin Mode Activated — All AI models unlocked!");
+      setTimeout(() => setAdminToast(null), 3500);
+    } else {
+      setAdminError("Invalid admin passcode. Please try again.");
+    }
+  };
+
+  const handleLockAdmin = () => {
+    setAdminUnlocked(false);
+    setSelectedModelId("auto");
+    try {
+      localStorage.removeItem("brainflow_admin_unlocked");
+      localStorage.setItem("brainflow_selected_model", "auto");
+    } catch {}
+    setModelDropdownOpen(false);
+    setAdminToast("Admin mode locked. Reverted to Auto Rotate.");
+    setTimeout(() => setAdminToast(null), 3000);
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
@@ -318,6 +467,9 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
     }
 
     try {
+      const activeModelObj =
+        AVAILABLE_MODELS.find((m) => m.id === selectedModelId) || AVAILABLE_MODELS[0];
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -325,6 +477,9 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
         },
         body: JSON.stringify({
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
+          provider: activeModelObj.id !== "auto" ? activeModelObj.provider : undefined,
+          model: activeModelObj.id !== "auto" ? activeModelObj.modelId : undefined,
+          adminPasscode: adminUnlocked ? "admin" : undefined,
           stream: true,
         }),
       });
@@ -493,6 +648,7 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
 
   const currentChat = chatHistory.find((c) => c.id === currentChatId);
   const currentTitle = currentChat ? currentChat.title : "New chat";
+  const currentModel = AVAILABLE_MODELS.find((m) => m.id === selectedModelId) || AVAILABLE_MODELS[0];
 
   return (
     <main className="h-screen h-[100dvh] w-screen bg-[#0a0e1a] text-[#eef2ff] flex overflow-hidden relative selection:bg-[#8b5cf6]/30 selection:text-[#22c1ff]">
@@ -1062,41 +1218,194 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                 e.preventDefault();
                 handleSendMessage();
               }}
-              className="flex items-center gap-2 bg-[#0d1226] border border-[#232b48] focus-within:border-[#8b5cf6] focus-within:shadow-[0_0_0_3px_rgba(139,92,246,0.15)] rounded-2xl px-3.5 py-2.5 transition"
+              className="bg-[#0d1226]/95 border border-[#232b48] focus-within:border-[#8b5cf6] focus-within:shadow-[0_0_0_3px_rgba(139,92,246,0.15)] rounded-2xl p-3 sm:p-3.5 transition"
             >
-              {/* Paperclip attachment button */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="p-1.5 text-[#8b93b8] hover:text-[#22c1ff] rounded-lg transition flex-shrink-0"
-                title="Attach text or code files (up to 8MB)"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
-                </svg>
-              </button>
-
-              {/* Message Input */}
-              <input
-                type="text"
+              {/* Message Input Field */}
+              <textarea
+                rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={attachedFiles.length > 0 ? "Add your instructions or prompt..." : "Message BrainFlow..."}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                placeholder={attachedFiles.length > 0 ? "Add your instructions or prompt..." : "Ask BrainFlow anything..."}
                 disabled={loading}
-                className="flex-1 bg-transparent border-none outline-none text-[#eef2ff] placeholder-[#8b93b8] text-base sm:text-sm leading-relaxed"
+                className="w-full bg-transparent border-none outline-none text-[#eef2ff] placeholder-[#8b93b8] text-base sm:text-sm leading-relaxed resize-none py-1 px-1 mb-2 max-h-36 overflow-y-auto block"
               />
 
-              {/* Send Button */}
-              <button
-                type="submit"
-                disabled={loading || (!input.trim() && attachedFiles.length === 0)}
-                className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] text-white flex items-center justify-center hover:brightness-110 active:scale-95 transition shadow-[0_0_15px_rgba(139,92,246,0.4)] disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
-                title="Send"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 -rotate-45 ml-0.5">
-                  <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
-                </svg>
-              </button>
+              {/* Bottom Toolbar Row (Matching Reference UI) */}
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#182038]/70">
+                <div className="flex items-center gap-2 relative" ref={modelDropdownRef}>
+                  {/* Paperclip attachment button */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-1.5 text-[#8b93b8] hover:text-[#22c1ff] rounded-lg transition flex-shrink-0 cursor-pointer"
+                    title="Attach text or code files (up to 8MB)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                    </svg>
+                  </button>
+
+                  {/* Model Selector Pill Button */}
+                  <button
+                    type="button"
+                    onClick={() => setModelDropdownOpen((prev) => !prev)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition cursor-pointer select-none ${
+                      selectedModelId === "auto"
+                        ? "bg-[#161d35]/70 hover:bg-[#161d35] border-[#232b48] text-[#eef2ff]"
+                        : "bg-[#8b5cf6]/20 hover:bg-[#8b5cf6]/30 border-[#8b5cf6]/50 text-[#eef2ff] shadow-[0_0_12px_rgba(139,92,246,0.25)]"
+                    }`}
+                  >
+                    <span className="text-sm">✨</span>
+                    <span className="font-medium text-[#eef2ff]">
+                      {currentModel.name}
+                    </span>
+                    {currentModel.isPremium && !adminUnlocked && (
+                      <span className="text-[10px] text-[#fbbf24] ml-0.5" title="Requires Admin Passcode">
+                        🔒
+                      </span>
+                    )}
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className={`w-3.5 h-3.5 text-[#8b93b8] transition-transform duration-200 ${
+                        modelDropdownOpen ? "rotate-180" : ""
+                      }`}
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+
+                  {/* Floating Popover Model Dropdown */}
+                  {modelDropdownOpen && (
+                    <div className="absolute bottom-full left-0 mb-2 w-[calc(100vw-32px)] max-w-[340px] sm:w-96 bg-[#10162a]/95 border border-[#232b48] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)] backdrop-blur-xl p-3 z-50 animate-rise">
+                      {/* Top Header */}
+                      <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1f2742]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold text-[#eef2ff]">Select AI Model</span>
+                        </div>
+                        {adminUnlocked ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] bg-[#8b5cf6]/20 border border-[#8b5cf6]/40 text-[#c084fc] px-2 py-0.5 rounded-full font-semibold">
+                              👑 Admin Unlocked
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleLockAdmin}
+                              className="text-[10px] text-[#8b93b8] hover:text-[#ff5d7a] underline"
+                              title="Lock back to free mode"
+                            >
+                              Lock
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setModelDropdownOpen(false);
+                              setAdminModalOpen(true);
+                            }}
+                            className="text-[11px] text-[#22c1ff] hover:text-[#8b5cf6] font-medium flex items-center gap-1 transition"
+                          >
+                            <span>👑 Unlock Admin</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Model List */}
+                      <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+                        {AVAILABLE_MODELS.map((m) => {
+                          const isSelected = selectedModelId === m.id;
+                          const isLocked = m.isPremium && !adminUnlocked;
+
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => handleSelectModel(m)}
+                              className={`w-full text-left p-2.5 rounded-xl border transition flex items-start justify-between gap-2 ${
+                                isSelected
+                                  ? "bg-[#1f2742] border-[#8b5cf6] shadow-[0_0_15px_rgba(139,92,246,0.2)]"
+                                  : "bg-[#0d1226]/60 hover:bg-[#161d35] border-[#232b48]/60 hover:border-[#38436b]"
+                              }`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span className="text-xs font-semibold text-[#eef2ff] truncate">
+                                    {m.name}
+                                  </span>
+                                  {m.badge && (
+                                    <span
+                                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                                        m.id === "auto"
+                                          ? "bg-[#10b981]/20 text-[#34d399] border border-[#10b981]/30"
+                                          : "bg-[#8b5cf6]/20 text-[#c084fc] border border-[#8b5cf6]/30"
+                                      }`}
+                                    >
+                                      {m.badge}
+                                    </span>
+                                  )}
+                                  {isLocked && (
+                                    <span className="text-[10px] text-[#fbbf24]" title="Requires Admin Passcode">
+                                      🔒
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-[#8b93b8] line-clamp-1 leading-relaxed">
+                                  {m.description}
+                                </p>
+                              </div>
+                              {isSelected && (
+                                <span className="text-[#8b5cf6] text-xs font-bold mt-1">✓</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Footer Info */}
+                      {!adminUnlocked && (
+                        <div className="mt-2.5 pt-2 border-t border-[#1f2742] flex items-center justify-between text-[11px] text-[#8b93b8]">
+                          <span>Free users default to Auto Rotate</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setModelDropdownOpen(false);
+                              setAdminModalOpen(true);
+                            }}
+                            className="text-[#22c1ff] hover:underline"
+                          >
+                            Admin access &rarr;
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Send Button (Matching Screenshot: Up Arrow + Send) */}
+                <button
+                  type="submit"
+                  disabled={loading || (!input.trim() && attachedFiles.length === 0)}
+                  className="flex items-center gap-1.5 px-4 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] text-white text-xs sm:text-sm font-semibold hover:brightness-110 active:scale-95 transition shadow-[0_0_15px_rgba(139,92,246,0.4)] disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0 cursor-pointer"
+                  title="Send message"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M10 17a.75.75 0 0 1-.75-.75V5.612L5.29 9.77a.75.75 0 0 1-1.08-1.04l5.25-5.5a.75.75 0 0 1 1.08 0l5.25 5.5a.75.75 0 1 1-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0 1 10 17Z" clipRule="evenodd" />
+                  </svg>
+                  <span>Send</span>
+                </button>
+              </div>
             </form>
 
             <p className="text-center text-[11px] text-[#4a5484] mt-2.5">
@@ -1226,6 +1535,84 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Admin Passcode Unlock Modal */}
+      {adminModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-rise">
+          <div className="bg-[#10162a] border border-[#232b48] rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#232b48]">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">👑</span>
+                <h3 className="text-base font-bold text-white font-display">Unlock Premium Models</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setAdminModalOpen(false);
+                  setAdminError(null);
+                }}
+                className="text-[#8b93b8] hover:text-white text-lg font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <p className="text-xs text-[#8b93b8] leading-relaxed">
+              Custom model selection (DeepSeek Chat, Llama 3.3, Qwen 2.5, GPT-4o Mini) is reserved for Pro and Admin users. Free sessions use Auto Rotate.
+            </p>
+
+            <form onSubmit={handleUnlockAdmin} className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs text-[#8b93b8] mb-1 font-medium">
+                  Admin Passcode
+                </label>
+                <input
+                  type="password"
+                  value={adminPasscodeInput}
+                  onChange={(e) => {
+                    setAdminPasscodeInput(e.target.value);
+                    setAdminError(null);
+                  }}
+                  placeholder="Enter admin passcode"
+                  autoFocus
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#232b48] bg-[#0d1226] text-[#eef2ff] placeholder-[#4a5484] text-sm outline-none focus:border-[#8b5cf6] focus:shadow-[0_0_0_3px_rgba(139,92,246,0.18)] transition"
+                />
+              </div>
+
+              {adminError && (
+                <p className="text-xs text-[#ff5d7a] font-medium animate-rise">
+                  {adminError}
+                </p>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminModalOpen(false);
+                    setAdminError(null);
+                  }}
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl border border-[#232b48] bg-[#161d35] text-[#8b93b8] hover:text-white transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 text-xs font-semibold rounded-xl bg-gradient-to-r from-[#22c1ff] via-[#8b5cf6] to-[#c026d3] text-white hover:brightness-110 transition shadow-[0_0_15px_rgba(139,92,246,0.3)]"
+                >
+                  Unlock Access
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Toast Notification */}
+      {adminToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-[#161d35] border border-[#8b5cf6] text-[#eef2ff] text-xs font-medium px-4 py-2.5 rounded-full shadow-[0_10px_30px_rgba(139,92,246,0.3)] backdrop-blur-md animate-rise flex items-center gap-2">
+          <span>{adminToast}</span>
         </div>
       )}
     </main>

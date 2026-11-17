@@ -82,6 +82,7 @@ const ChatBodySchema = z.object({
   messages: z.array(MessageItemSchema).max(60).optional(),
   provider: z.string().max(50).optional(),
   model: z.string().max(100).optional(),
+  adminPasscode: z.string().max(50).optional(),
   stream: z.boolean().optional(),
 });
 
@@ -159,10 +160,24 @@ export async function POST(req: NextRequest) {
     const {
       message,
       messages,
-      provider,
-      model,
+      provider: requestedProvider,
+      model: requestedModel,
+      adminPasscode,
       stream = true,
     } = parseResult.data;
+
+    // Admin passcode check (default: "admin")
+    const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE || "admin";
+    const isAdmin = adminPasscode?.trim() === ADMIN_PASSCODE;
+
+    let provider = requestedProvider;
+    let model = requestedModel;
+
+    // Enforce Premium rule: custom model selection requires Admin/Pro access
+    if (requestedModel && requestedModel !== "auto" && requestedModel !== "openrouter/free" && !isAdmin) {
+      provider = "openrouter";
+      model = "openrouter/free";
+    }
 
     // 3. Format and Sanitize Messages
     let formattedMessages: ChatMessage[] = [];
