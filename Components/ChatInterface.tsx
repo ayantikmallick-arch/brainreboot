@@ -12,6 +12,8 @@ import ParticleBackground from "@/Components/ParticleBackground";
 export type Message = {
   role: "user" | "assistant";
   content: string;
+  modelName?: string;
+  provider?: string;
 };
 
 export type Chat = {
@@ -62,6 +64,7 @@ export interface ModelOption {
   id: string;
   name: string;
   provider: string;
+  providerTitle: string;
   modelId: string;
   badge?: string;
   description: string;
@@ -73,35 +76,61 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     id: "auto",
     name: "Auto Rotate",
     provider: "openrouter",
+    providerTitle: "OpenRouter",
     modelId: "openrouter/free",
     badge: "Free Default",
     description: "Intelligently auto-rotates across providers for reliable, fast answers.",
     isPremium: false,
   },
+  // Groq LPUs
   {
-    id: "deepseek-chat",
-    name: "DeepSeek Chat",
-    provider: "openrouter",
-    modelId: "deepseek/deepseek-chat",
-    badge: "Pro",
-    description: "DeepSeek V3 — outstanding coding, mathematics & complex reasoning.",
+    id: "groq-gpt-oss-120b",
+    name: "Groq GPT OSS 120B",
+    provider: "groq",
+    providerTitle: "Groq LPUs",
+    modelId: "openai/gpt-oss-120b",
+    badge: "Groq LPU",
+    description: "High-reasoning 120B open-weights model on ultra-fast Groq hardware LPUs.",
     isPremium: true,
   },
   {
-    id: "llama-3.3-70b",
-    name: "Llama 3.3 70B",
+    id: "groq-qwen-27b",
+    name: "Groq Qwen 3.8 27B",
+    provider: "groq",
+    providerTitle: "Groq LPUs",
+    modelId: "qwen/qwen3.8-27b",
+    badge: "Groq LPU",
+    description: "High-speed Qwen 27B model running natively on Groq LPUs.",
+    isPremium: true,
+  },
+  {
+    id: "groq-gpt-oss-20b",
+    name: "Groq GPT OSS 20B",
+    provider: "groq",
+    providerTitle: "Groq LPUs",
+    modelId: "openai/gpt-oss-20b",
+    badge: "Groq LPU",
+    description: "Ultra-low-latency 20B reasoning model on Groq hardware.",
+    isPremium: true,
+  },
+  // OpenRouter Pro Models
+  {
+    id: "deepseek-chat",
+    name: "DeepSeek Chat (V3)",
     provider: "openrouter",
-    modelId: "meta-llama/llama-3.3-70b-instruct",
-    badge: "Pro",
-    description: "Meta's flagship 70B parameter model with state-of-the-art accuracy.",
+    providerTitle: "OpenRouter",
+    modelId: "deepseek/deepseek-chat",
+    badge: "OpenRouter",
+    description: "DeepSeek V3 — outstanding coding, mathematics & complex reasoning.",
     isPremium: true,
   },
   {
     id: "qwen-2.5-72b",
     name: "Qwen 2.5 72B",
     provider: "openrouter",
+    providerTitle: "OpenRouter",
     modelId: "qwen/qwen-2.5-72b-instruct",
-    badge: "Pro",
+    badge: "OpenRouter",
     description: "Alibaba's benchmark leader for code generation, STEM & logic.",
     isPremium: true,
   },
@@ -109,18 +138,41 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     id: "gpt-4o-mini",
     name: "GPT-4o Mini",
     provider: "openrouter",
+    providerTitle: "OpenRouter",
     modelId: "openai/gpt-4o-mini",
-    badge: "Pro",
+    badge: "OpenRouter",
     description: "Fast, intelligent, lightweight OpenAI model with broad knowledge.",
+    isPremium: true,
+  },
+  {
+    id: "llama-3.3-70b",
+    name: "Llama 3.3 70B",
+    provider: "openrouter",
+    providerTitle: "OpenRouter",
+    modelId: "meta-llama/llama-3.3-70b-instruct",
+    badge: "OpenRouter",
+    description: "Meta's flagship 70B parameter model with state-of-the-art accuracy.",
     isPremium: true,
   },
   {
     id: "openrouter-auto",
     name: "OpenRouter Auto",
     provider: "openrouter",
+    providerTitle: "OpenRouter",
     modelId: "openrouter/auto",
-    badge: "Pro",
+    badge: "OpenRouter",
     description: "Dynamic auto-routing across the highest-performing community models.",
+    isPremium: true,
+  },
+  // Cloudflare Workers AI
+  {
+    id: "cloudflare-llama-3.2-3b",
+    name: "Cloudflare Llama 3.2 3B",
+    provider: "cloudflare",
+    providerTitle: "Cloudflare Workers AI",
+    modelId: "@cf/meta/llama-3.2-3b-instruct",
+    badge: "Cloudflare AI",
+    description: "Ultra-fast Meta Llama 3.2 edge inference on Cloudflare Workers AI.",
     isPremium: true,
   },
 ];
@@ -479,6 +531,8 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
           provider: activeModelObj.id !== "auto" ? activeModelObj.provider : undefined,
           model: activeModelObj.id !== "auto" ? activeModelObj.modelId : undefined,
+          modelName: activeModelObj.name,
+          providerName: activeModelObj.providerTitle,
           adminPasscode: adminUnlocked ? "admin" : undefined,
           stream: true,
         }),
@@ -497,7 +551,12 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
 
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: "" },
+          {
+            role: "assistant",
+            content: "",
+            modelName: activeModelObj.name,
+            provider: activeModelObj.providerTitle,
+          },
         ]);
 
         let streamBuffer = "";
@@ -528,6 +587,8 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                     updated[lastIdx] = {
                       role: "assistant",
                       content: assistantContent,
+                      modelName: activeModelObj.name,
+                      provider: activeModelObj.providerTitle,
                     };
                   }
                   return updated;
@@ -549,7 +610,12 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                   ...c,
                   messages: [
                     ...c.messages,
-                    { role: "assistant" as const, content: finalAssistantContent },
+                    {
+                      role: "assistant" as const,
+                      content: finalAssistantContent,
+                      modelName: activeModelObj.name,
+                      provider: activeModelObj.providerTitle,
+                    },
                   ],
                 }
               : c
@@ -563,7 +629,12 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
 
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: assistantText },
+          {
+            role: "assistant",
+            content: assistantText,
+            modelName: activeModelObj.name,
+            provider: activeModelObj.providerTitle,
+          },
         ]);
 
         setChatHistory((prev) => {
@@ -1019,6 +1090,17 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                     </div>
 
                     <div className="flex-1 min-w-0">
+                      {/* Active Model & Engine Badge */}
+                      <div className="flex items-center gap-2 mb-1.5 px-0.5">
+                        <span className="text-[10px] font-semibold text-[#c084fc] bg-[#1e2640]/90 border border-[#3b4770]/80 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5 shadow-sm">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse"></span>
+                          {msg.modelName || currentModel.name}
+                        </span>
+                        <span className="text-[10px] text-[#64748b] font-medium">
+                          via {msg.provider || currentModel.providerTitle}
+                        </span>
+                      </div>
+
                       <div className="w-full bg-[#161d35]/90 border border-[#232b48] text-[#eef2ff] px-4 sm:px-5 py-3 sm:py-4 rounded-2xl rounded-bl-sm text-xs sm:text-sm leading-relaxed break-words shadow-lg backdrop-blur-sm">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
@@ -1349,6 +1431,10 @@ export default function ChatInterface({ initialChatId }: ChatInterfaceProps) {
                                       className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
                                         m.id === "auto"
                                           ? "bg-[#10b981]/20 text-[#34d399] border border-[#10b981]/30"
+                                          : m.provider === "groq"
+                                          ? "bg-[#f97316]/20 text-[#fb923c] border border-[#f97316]/30"
+                                          : m.provider === "cloudflare"
+                                          ? "bg-[#0ea5e9]/20 text-[#38bdf8] border border-[#0ea5e9]/30"
                                           : "bg-[#8b5cf6]/20 text-[#c084fc] border border-[#8b5cf6]/30"
                                       }`}
                                     >

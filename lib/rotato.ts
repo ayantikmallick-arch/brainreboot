@@ -1,4 +1,4 @@
-export type RotatoProvider = "openrouter" | "groq" | "sambanova" | "cloudflare" | "deepseek";
+export type RotatoProvider = "openrouter" | "groq" | "sambanova" | "cloudflare" | "deepseek" | "huggingface";
 
 export interface RotatoModelOption {
   id: string;
@@ -25,8 +25,7 @@ export const PROVIDER_CATALOGS: Record<RotatoProvider, ProviderCatalog> = {
     defaultModel: "openrouter/free",
     models: [
       { id: "openrouter/free", name: "Auto Rotate (Free)", description: "Smart auto-switching across providers for best speed and reliability." },
-      { id: "deepseek/deepseek-chat", name: "DeepSeek Chat", description: "DeepSeek V3 — outstanding coding, mathematics & reasoning." },
-      { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B", description: "Meta's flagship high-intelligence open model." },
+      { id: "deepseek/deepseek-chat", name: "DeepSeek Chat (V3)", description: "DeepSeek V3 — outstanding coding, mathematics & reasoning." },
       { id: "qwen/qwen-2.5-72b-instruct", name: "Qwen 2.5 72B", description: "Alibaba's flagship powerhouse for reasoning & code." },
       { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", description: "Fast, intelligent, lightweight OpenAI model." },
       { id: "openrouter/auto", name: "OpenRouter Auto", description: "Automated routing across the best community models." },
@@ -35,20 +34,12 @@ export const PROVIDER_CATALOGS: Record<RotatoProvider, ProviderCatalog> = {
   groq: {
     name: "Groq",
     endpoint: "/groq/chat/completions",
-    defaultModel: "openai/gpt-oss-20b",
+    defaultModel: "openai/gpt-oss-120b",
     models: [
-      { id: "openai/gpt-oss-20b", name: "GPT OSS 20B (Ultra Fast)" },
-      { id: "qwen/qwen3.8-27b", name: "Qwen 3.8 27B" },
-      { id: "openai/gpt-oss-120b", name: "GPT OSS 120B (High Reasoning)" },
-      { id: "allam-2-7b", name: "ALLaM 2 7B" },
-    ],
-  },
-  sambanova: {
-    name: "SambaNova",
-    endpoint: "/sambanova/chat/completions",
-    defaultModel: "Meta-Llama-3.3-70B-Instruct",
-    models: [
-      { id: "Meta-Llama-3.3-70B-Instruct", name: "Llama 3.3 70B (SambaNova Fast)" },
+      { id: "openai/gpt-oss-120b", name: "Groq GPT OSS 120B", description: "High-reasoning 120B model on Groq hardware LPUs." },
+      { id: "qwen/qwen3.8-27b", name: "Groq Qwen 3.8 27B", description: "Fast Qwen 3.8 27B on Groq LPUs." },
+      { id: "openai/gpt-oss-20b", name: "Groq GPT OSS 20B", description: "Compact 20B ultra-fast model." },
+      { id: "allam-2-7b", name: "ALLaM 2 7B", description: "Arabic/English bilingual LLM." },
     ],
   },
   cloudflare: {
@@ -56,8 +47,16 @@ export const PROVIDER_CATALOGS: Record<RotatoProvider, ProviderCatalog> = {
     endpoint: "/cloudflare/chat/completions",
     defaultModel: "@cf/meta/llama-3.2-3b-instruct",
     models: [
-      { id: "@cf/meta/llama-3.2-3b-instruct", name: "Llama 3.2 3B Instruct" },
-      { id: "@cf/meta/llama-3.2-1b-instruct", name: "Llama 3.2 1B Instruct" },
+      { id: "@cf/meta/llama-3.2-3b-instruct", name: "Cloudflare Llama 3.2 3B", description: "Meta Llama 3.2 on Cloudflare Workers AI." },
+      { id: "@cf/meta/llama-3.1-8b-instruct", name: "Cloudflare Llama 3.1 8B", description: "Meta Llama 3.1 8B on Cloudflare Workers AI." },
+    ],
+  },
+  sambanova: {
+    name: "SambaNova",
+    endpoint: "/sambanova/chat/completions",
+    defaultModel: "Meta-Llama-3.3-70B-Instruct",
+    models: [
+      { id: "Meta-Llama-3.3-70B-Instruct", name: "Llama 3.3 70B (SambaNova)", description: "Meta Llama 3.3 70B on SambaNova Sn40L." },
     ],
   },
   deepseek: {
@@ -65,22 +64,32 @@ export const PROVIDER_CATALOGS: Record<RotatoProvider, ProviderCatalog> = {
     endpoint: "/deepseek/chat/completions",
     defaultModel: "deepseek-chat",
     models: [
-      { id: "deepseek-chat", name: "DeepSeek Chat Direct" },
+      { id: "deepseek-chat", name: "DeepSeek Chat Direct", description: "Direct official DeepSeek API." },
+    ],
+  },
+  huggingface: {
+    name: "HuggingFace",
+    endpoint: "/huggingface/chat/completions",
+    defaultModel: "Qwen/Qwen2.5-72B-Instruct",
+    models: [
+      { id: "Qwen/Qwen2.5-72B-Instruct", name: "Qwen 2.5 72B (HuggingFace)" },
     ],
   },
 };
 
-const DEFAULT_FALLBACK_ORDER: RotatoProvider[] = ["openrouter", "groq", "sambanova", "cloudflare"];
+const DEFAULT_FALLBACK_ORDER: RotatoProvider[] = ["openrouter", "groq", "cloudflare"];
 const ONLINE_ROTATO_URL = "https://rotato-kg3t.onrender.com";
 
 export function getRotatoBaseUrls(): string[] {
   const envUrl = process.env.ROTATO_BASE_URL?.replace(/\/+$/, "");
+  // Prioritize online Render URL in production / serverless environments
   const list: string[] = [];
-  if (envUrl) {
+  if (envUrl && !envUrl.includes("localhost")) {
     list.push(envUrl);
   }
-  if (!list.includes(ONLINE_ROTATO_URL)) {
-    list.push(ONLINE_ROTATO_URL);
+  list.push(ONLINE_ROTATO_URL);
+  if (envUrl && envUrl.includes("localhost")) {
+    list.push(envUrl);
   }
   return list;
 }

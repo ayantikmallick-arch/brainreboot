@@ -8,16 +8,21 @@ import {
 
 export const runtime = "nodejs";
 
-const BRAINFLOW_SYSTEM_PROMPT: ChatMessage = {
-  role: "system",
-  content: `You are BrainFlow, an advanced, intelligent, and versatile AI assistant created and designed by Ayantik Mallick.
+function buildBrainFlowSystemPrompt(modelName: string, providerName: string): ChatMessage {
+  return {
+    role: "system",
+    content: `You are BrainFlow, an advanced, intelligent, and versatile AI assistant created and designed by Ayantik Mallick.
+
+Active Engine & Architecture:
+- You are currently running on and powered by the ${modelName} model via ${providerName} (routed through the Rotato proxy).
+- If the user explicitly asks which model, engine, or provider is being used (e.g. "which model am i using?", "what model are you?"), inform them clearly that you are BrainFlow powered by the ${modelName} model via ${providerName}.
 
 Identity Guidelines:
 - Your name is strictly BrainFlow.
 - You were created and engineered by Ayantik Mallick.
 - If asked "who are you?", "who r u?", or about your creators/identity, proudly identify as BrainFlow, built by Ayantik Mallick.
 - Special Easter Egg / Identity Rule: If anyone asks who Annesha Sikdar is (or any question about Annesha / Annesha Sikdar), ALWAYS respond: "The love of my creator Ayantik's life ❤️".
-- NEVER claim to be ChatGPT, OpenAI, Anthropic, Gemini, or any other company's bot.
+- NEVER claim to be OpenAI, Anthropic, or any other company as your identity; your identity is BrainFlow, engineered by Ayantik Mallick, running on the ${modelName} engine.
 - You help users with coding, mathematics, research, writing, file analysis, and creative thinking with clear, elegant markdown formatting.
 
 Formatting & Markdown Instructions:
@@ -30,7 +35,8 @@ Formatting & Markdown Instructions:
 - NEVER output raw HTML tags (such as <br>, <table>, <tr>, <td>, <p>, <div>, or <b>) for formatting. Use standard Markdown equivalents (**bold**, *italic*, bullet lists with -, numbered lists with 1., headings with #/##/###, and standard line breaks).
 - For code and terminal commands, always use fenced code blocks with language identifiers (e.g. \`\`\`typescript, \`\`\`python, \`\`\`bash).
 - Structure responses with readable headings (#, ##, ###), organized bullet points, and clean spacing.`,
-};
+  };
+}
 
 const ANNESHA_RESPONSE = "The love of my creator Ayantik's life ❤️";
 
@@ -71,6 +77,42 @@ function isAnneshaQuery(text: string): boolean {
   return false;
 }
 
+function isModelQuery(text: string): boolean {
+  if (!text) return false;
+  const clean = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Direct short queries
+  if (
+    clean === "which model" ||
+    clean === "what model" ||
+    clean === "model" ||
+    clean === "current model" ||
+    clean === "active model" ||
+    clean === "who powers you" ||
+    clean === "what engine"
+  ) {
+    return true;
+  }
+
+  const mentionsModel = /\b(model|models|engine|engines|llm|llms|architecture)\b/i.test(clean);
+  const mentionsInquiry = /\b(which|what|tell|show|know|who)\b/i.test(clean);
+  const mentionsUsage = /\b(using|use|active|running|selected|current|power|powers|powering)\b/i.test(clean);
+  const mentionsYouOrI = /\b(i|you|u|we|this|chat)\b/i.test(clean);
+
+  if (mentionsModel && mentionsInquiry) {
+    return true;
+  }
+  if (mentionsModel && mentionsUsage && mentionsYouOrI) {
+    return true;
+  }
+
+  return false;
+}
+
 // Strict Zod Validation Schema
 const MessageItemSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
@@ -82,6 +124,8 @@ const ChatBodySchema = z.object({
   messages: z.array(MessageItemSchema).max(60).optional(),
   provider: z.string().max(50).optional(),
   model: z.string().max(100).optional(),
+  modelName: z.string().max(100).optional(),
+  providerName: z.string().max(100).optional(),
   adminPasscode: z.string().max(50).optional(),
   stream: z.boolean().optional(),
 });
@@ -162,6 +206,8 @@ export async function POST(req: NextRequest) {
       messages,
       provider: requestedProvider,
       model: requestedModel,
+      modelName: requestedModelName,
+      providerName: requestedProviderName,
       adminPasscode,
       stream = true,
     } = parseResult.data;
@@ -172,11 +218,34 @@ export async function POST(req: NextRequest) {
 
     let provider = requestedProvider;
     let model = requestedModel;
+    let modelName = requestedModelName;
+    let providerName = requestedProviderName;
 
     // Enforce Premium rule: custom model selection requires Admin/Pro access
     if (requestedModel && requestedModel !== "auto" && requestedModel !== "openrouter/free" && !isAdmin) {
       provider = "openrouter";
       model = "openrouter/free";
+      modelName = "Auto Rotate";
+      providerName = "OpenRouter";
+    }
+
+    if (!modelName) {
+      if (model === "openai/gpt-oss-120b") modelName = "Groq GPT OSS 120B";
+      else if (model === "qwen/qwen3.8-27b") modelName = "Groq Qwen 3.8 27B";
+      else if (model === "openai/gpt-oss-20b") modelName = "Groq GPT OSS 20B";
+      else if (model === "deepseek/deepseek-chat") modelName = "DeepSeek Chat (V3)";
+      else if (model === "qwen/qwen-2.5-72b-instruct") modelName = "Qwen 2.5 72B";
+      else if (model === "openai/gpt-4o-mini") modelName = "GPT-4o Mini";
+      else if (model === "meta-llama/llama-3.3-70b-instruct") modelName = "Llama 3.3 70B";
+      else if (model === "@cf/meta/llama-3.2-3b-instruct") modelName = "Cloudflare Llama 3.2 3B";
+      else modelName = model || "Auto Rotate";
+    }
+
+    if (!providerName) {
+      if (provider === "groq") providerName = "Groq LPUs";
+      else if (provider === "cloudflare") providerName = "Cloudflare Workers AI";
+      else if (provider === "openrouter") providerName = "OpenRouter";
+      else providerName = provider ? provider.toUpperCase() : "Rotato";
     }
 
     // 3. Format and Sanitize Messages
@@ -248,12 +317,53 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 5. Inject BrainFlow identity system prompt
+    // 4b. Check for Model Inquiry: e.g. "which model am i using"
+    if (isModelQuery(lastUserMessage)) {
+      const modelAnswer = `You are currently using **BrainFlow**, powered by the **${modelName}** model via **${providerName}** on Rotato.
+
+- **Active Model:** \`${model || "openrouter/free"}\`
+- **Engine Provider:** \`${provider || "openrouter"}\` (${providerName})
+- **Routing:** Direct Rotato Proxy with live key rotation`;
+
+      if (stream === false) {
+        return NextResponse.json({
+          text: modelAnswer,
+        });
+      }
+
+      const encoder = new TextEncoder();
+      const modelStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: "chunk",
+                text: modelAnswer,
+              })}\n\n`
+            )
+          );
+          controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+          controller.close();
+        },
+      });
+
+      return new Response(modelStream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    // 5. Inject BrainFlow identity system prompt with dynamic model knowledge
+    const activeSystemPrompt = buildBrainFlowSystemPrompt(modelName, providerName);
     const existingSystemIdx = formattedMessages.findIndex((m) => m.role === "system");
     if (existingSystemIdx >= 0) {
-      formattedMessages[existingSystemIdx] = BRAINFLOW_SYSTEM_PROMPT;
+      formattedMessages[existingSystemIdx] = activeSystemPrompt;
     } else {
-      formattedMessages = [BRAINFLOW_SYSTEM_PROMPT, ...formattedMessages];
+      formattedMessages = [activeSystemPrompt, ...formattedMessages];
     }
 
     // 5. Non-streaming Execution
